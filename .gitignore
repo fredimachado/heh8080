@@ -482,3 +482,6 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+
+# CP500 ROM dumps (copyrighted - user-supplied at runtime, never commit)
+cp500/*.BIN

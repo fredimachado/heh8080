@@ -7,6 +7,7 @@ namespace Heh8080.UI.Views;
 
 public partial class MainView : UserControl
 {
+    private MainViewModel? _viewModel;
     /// <summary>
     /// Event fired when the FJM-3A logo is clicked.
     /// Platform-specific code should handle this to show configuration UI.
@@ -22,6 +23,8 @@ public partial class MainView : UserControl
     /// Event fired when user clicks the exit button.
     /// </summary>
     public event Action? ExitRequested;
+    public event Action? Cp500KeyInput;
+    public event Action? DisplaySizeChanged;
 
     public MainView()
     {
@@ -30,9 +33,14 @@ public partial class MainView : UserControl
         // Wire terminal when DataContext is set
         DataContextChanged += (s, e) =>
         {
+            if (_viewModel != null)
+                _viewModel.MachineProfileChanged -= ApplyMachineProfile;
+
             if (DataContext is MainViewModel vm)
             {
-                Terminal.Terminal = vm.Terminal;
+                _viewModel = vm;
+                _viewModel.MachineProfileChanged += ApplyMachineProfile;
+                ApplyMachineProfile();
             }
         };
 
@@ -44,6 +52,18 @@ public partial class MainView : UserControl
 
         // Forward exit request to platform code
         Terminal.ExitClicked += () => ExitRequested?.Invoke();
+        Terminal.Cp500KeyInput += () => Cp500KeyInput?.Invoke();
+    }
+
+    private void ApplyMachineProfile()
+    {
+        if (_viewModel == null)
+            return;
+
+        Terminal.Terminal = _viewModel.IsCp500 ? null : _viewModel.Terminal;
+        Terminal.Cp500Video = _viewModel.IsCp500 ? _viewModel.Cp500Video : null;
+        Terminal.Cp500Keyboard = _viewModel.IsCp500 ? _viewModel.Cp500Keyboard : null;
+        DisplaySizeChanged?.Invoke();
     }
 
     /// <summary>

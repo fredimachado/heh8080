@@ -6,8 +6,9 @@
 - [practices.md](practices.md) - Patterns and conventions
 
 ## Plans
-- [plans/emulator-implementation.md](plans/emulator-implementation.md) - Full implementation plan (8 phases, all complete)
+- [plans/emulator-implementation.md](plans/emulator-implementation.md) - CP/M architecture and validation scope
 - [plans/phase5-terminal.md](plans/phase5-terminal.md) - ADM-3A terminal with CRT effects
+- [plans/cp500-emulation.md](plans/cp500-emulation.md) - CP-500 foundation status and remaining integration plan
 
 ## Core
 - [core/cpu.md](core/cpu.md) - 8080 CPU implementation details
@@ -16,6 +17,12 @@
 ## Devices
 - [devices/io-ports.md](devices/io-ports.md) - I/O port specification
 - [devices/devices.md](devices/devices.md) - Device layer implementation
+
+## CP-500
+- [cp500/summary.md](cp500/summary.md) - Reusable CP-500 machine composition
+- [cp500/memory-map.md](cp500/memory-map.md) - Mapped-ROM/RAM/VRAM/keyboard contract
+- [cp500/devices.md](cp500/devices.md) - CP-500 peripheral and WD1791 contracts
+- [cp500/desktop-integration.md](cp500/desktop-integration.md) - Avalonia profile, display, input, and execution host
 
 ## Terminal
 - [terminal/terminal.md](terminal/terminal.md) - ADM-3A terminal emulator

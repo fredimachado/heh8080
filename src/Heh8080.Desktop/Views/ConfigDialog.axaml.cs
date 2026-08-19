@@ -24,6 +24,17 @@ public partial class ConfigDialog : Window
         _viewModel = viewModel;
         UpdateDriveLabels();
         UpdateCpuSelection();
+        UpdateMachineSelection();
+    }
+
+    private void UpdateMachineSelection()
+    {
+        if (_viewModel == null) return;
+        MachineCpm.IsChecked = _viewModel.MachineProfile == DesktopMachineProfile.Cpm;
+        MachineCp500.IsChecked = _viewModel.MachineProfile == DesktopMachineProfile.Cp500;
+        MachineCp500.IsEnabled = _viewModel.IsCp500Available;
+        CpuZ80.IsEnabled = !_viewModel.IsCp500;
+        Cpu8080.IsEnabled = !_viewModel.IsCp500;
     }
 
     private void UpdateCpuSelection()
@@ -110,6 +121,27 @@ public partial class ConfigDialog : Window
             await _viewModel.SwitchCpuType(newType);
             StatusLabel.Text = $"Switched to {_viewModel.CpuTypeName}";
         }
+    }
+
+    private async void MachineProfile_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel == null) return;
+
+        var profile = MachineCp500.IsChecked == true
+            ? DesktopMachineProfile.Cp500
+            : DesktopMachineProfile.Cpm;
+        try
+        {
+            await _viewModel.SwitchMachineProfile(profile);
+            StatusLabel.Text = profile == DesktopMachineProfile.Cp500
+                ? "CP-500: cp500/CP500-1.BIN"
+                : "CP/M profile running";
+        }
+        catch (Exception ex)
+        {
+            StatusLabel.Text = ex.Message;
+        }
+        UpdateMachineSelection();
     }
 
     private void Close_Click(object? sender, RoutedEventArgs e)

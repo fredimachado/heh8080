@@ -91,7 +91,7 @@
             <TextBlock Text="SYSTEM" FontWeight="Bold" Foreground="#33FF33"
                        FontFamily="Consolas,monospace" FontSize="12"/>
 
-            <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="80,*" Margin="8,0,0,0">
+            <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="80,*" Margin="8,0,0,0">
                 <Grid.Styles>
                     <Style Selector="TextBlock">
                         <Setter Property="FontFamily" Value="Consolas,monospace"/>
@@ -105,16 +105,24 @@
                     </Style>
                 </Grid.Styles>
 
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="CPU:"/>
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Machine:"/>
                 <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" Spacing="16">
+                    <RadioButton x:Name="MachineCpm" Content="CP/M" GroupName="Machine"
+                                 IsChecked="True" Click="MachineProfile_Click"/>
+                    <RadioButton x:Name="MachineCp500" Content="CP-500" GroupName="Machine"
+                                 Click="MachineProfile_Click"/>
+                </StackPanel>
+
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="CPU:" Margin="0,8,0,0"/>
+                <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="16" Margin="0,8,0,0">
                     <RadioButton x:Name="CpuZ80" Content="Z80" GroupName="CpuType"
                                  IsChecked="True" Click="CpuType_Click"/>
                     <RadioButton x:Name="Cpu8080" Content="8080" GroupName="CpuType"
                                  Click="CpuType_Click"/>
                 </StackPanel>
 
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Action:" Margin="0,8,0,0"/>
-                <StackPanel Grid.Row="1" Grid.Column="1" Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Action:" Margin="0,8,0,0"/>
+                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
                     <Button Content="Reset CPU" Click="Reset_Click"
                             Background="#1A2A1A" Foreground="#33FF33"
                             BorderBrush="#33FF33" BorderThickness="1"
