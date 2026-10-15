@@ -39,17 +39,21 @@ public sealed class MappedMemoryTests
     }
 
     [Fact]
-    public void KeyboardMatrixReadsSelectedActiveLowRows()
+    public void KeyboardMatrixIsActiveHighAndOrsSelectedRows()
     {
         var matrix = new KeyboardMatrix();
-        matrix.SetKeyState(0, 0, pressed: true);
-        matrix.SetKeyState(1, 1, pressed: true);
         var keyboard = new KeyboardMatrixRegion(0x3800, 0x100, matrix);
 
-        Assert.Equal(0xFE, keyboard.Read(0x3801));
-        Assert.Equal(0xFD, keyboard.Read(0x3802));
-        Assert.Equal(0xFF, keyboard.Read(0x3803));
-        Assert.Equal(0xFF, keyboard.Read(0x3800));
+        Assert.Equal(0x00, keyboard.Read(0x38FF));
+
+        matrix.SetKeyState(0, 0, pressed: true);
+        matrix.SetKeyState(1, 1, pressed: true);
+
+        Assert.Equal(0x01, keyboard.Read(0x3801));
+        Assert.Equal(0x02, keyboard.Read(0x3802));
+        Assert.Equal(0x03, keyboard.Read(0x3803));
+        Assert.Equal(0x00, keyboard.Read(0x3804));
+        Assert.Equal(0x00, keyboard.Read(0x3800));
     }
 
     [Fact]
@@ -66,99 +70,101 @@ public sealed class MappedMemoryTests
 public sealed class Cp500MachineTests
 {
     [Fact]
-    public void RealRomIdleKeyboardDoesNotInjectACharacter()
+    public void RealRomBootsToBasicAndRunsAStatement()
     {
-        byte[] rom = File.ReadAllBytes(Path.Combine("..", "..", "..", "..", "..", "cp500", "CP500-1.BIN"));
-        var machine = new Cp500Machine(Cp500MachineProfile.Original, rom);
-        for (int i = 0; i < 5_000_000; i++)
-            machine.Step();
+        var session = new RealRomSession();
 
-        Assert.Equal((byte)'C', machine.Video.ReadCharacter(0, 1));
-        Assert.Equal((byte)'a', machine.Video.ReadCharacter(1, 1));
-        Assert.Equal((byte)'s', machine.Video.ReadCharacter(2, 1));
-        Assert.Equal((byte)'s', machine.Video.ReadCharacter(3, 1));
-        Assert.Equal((byte)'?', machine.Video.ReadCharacter(4, 1));
-        Assert.Equal((byte)' ', machine.Video.ReadCharacter(5, 1));
+        session.Run(seconds: 3);
+        string boot = session.Screen();
+
+        Assert.Contains("PROLOGICA CP-500", boot);
+        Assert.Contains("BASIC (S ou N)", boot);
+        Assert.DoesNotContain("Cass?", boot);
+
+        session.Type("S\r\r");
+        session.Run(seconds: 3);
+        session.Type("PRINT 22\r");
+        session.Run(seconds: 1);
+        string basic = session.Screen();
+
+        Assert.Contains("READY", basic);
+        Assert.Contains("\n 22", "\n" + basic);
     }
 
-    [Fact]
-    public void RealRomAcceptsCassetteResponse()
+    private sealed class RealRomSession
     {
-        byte[] rom = File.ReadAllBytes(Path.Combine("..", "..", "..", "..", "..", "cp500", "CP500-1.BIN"));
-        var machine = new Cp500Machine(Cp500MachineProfile.Original, rom);
-        RunUntilText(machine, "Cass?", 5_000_000);
+        private readonly long _tickPeriodCycles;
+        private long _cyclesUntilTick;
 
-        PressKey(machine, 6, 0);
-        RunForCycles(machine, 100_000);
-
-        Assert.True(ContainsText(machine, "Mem. usada ?"));
-    }
-
-    private static bool ContainsText(Cp500Machine machine, string text)
-    {
-        for (int row = 0; row < Cp500VideoDevice.Rows; row++)
+        public RealRomSession()
         {
-            for (int column = 0; column <= Cp500VideoDevice.Columns - text.Length; column++)
+            byte[] rom = File.ReadAllBytes(Path.Combine("..", "..", "..", "..", "..", "cp500", "cp500.rom"));
+            Machine = new Cp500Machine(Cp500MachineProfile.Original, rom);
+            _tickPeriodCycles = Machine.Profile.ClockHz / Machine.Interrupts.Hertz;
+            _cyclesUntilTick = _tickPeriodCycles;
+        }
+
+        public Cp500Machine Machine { get; }
+
+        public void Run(double seconds)
+        {
+            long targetCycles = (long)(seconds * Machine.Profile.ClockHz);
+            for (long cycles = 0; cycles < targetCycles;)
             {
-                bool matches = true;
-                for (int index = 0; index < text.Length; index++)
+                int instructionCycles = Machine.Step();
+                cycles += instructionCycles;
+                _cyclesUntilTick -= instructionCycles;
+                if (_cyclesUntilTick <= 0)
                 {
-                    if (machine.Video.ReadCharacter(column + index, row) != text[index])
-                    {
-                        matches = false;
-                        break;
-                    }
+                    Machine.TickInterrupt();
+                    _cyclesUntilTick += _tickPeriodCycles;
+                }
+            }
+        }
+
+        public void Type(string keys)
+        {
+            foreach (char key in keys)
+            {
+                (int row, int column) = MatrixPosition(key);
+                Machine.Keyboard.SetKeyState(row, column, pressed: true);
+                Run(seconds: 0.1);
+                Machine.Keyboard.SetKeyState(row, column, pressed: false);
+                Run(seconds: 0.5);
+            }
+        }
+
+        public string Screen()
+        {
+            var rows = new List<string>();
+            for (int row = 0; row < Cp500VideoDevice.Rows; row++)
+            {
+                var text = new char[Cp500VideoDevice.Columns];
+                for (int column = 0; column < text.Length; column++)
+                {
+                    byte value = Machine.Video.ReadCharacter(column, row);
+                    text[column] = value is >= 0x20 and < 0x7F ? (char)value : ' ';
                 }
 
-                if (matches)
-                    return true;
+                rows.Add(new string(text).TrimEnd());
             }
+
+            return string.Join('\n', rows);
         }
 
-        return false;
-    }
-
-    private static void RunUntilText(Cp500Machine machine, string text, int maximumInstructions)
-    {
-        int cyclesUntilInterrupt = (int)(machine.Profile.ClockHz / machine.Interrupts.Hertz);
-        for (int instruction = 0; instruction < maximumInstructions; instruction++)
+        private static (int Row, int Column) MatrixPosition(char key) => key switch
         {
-            cyclesUntilInterrupt -= machine.Step();
-            if (cyclesUntilInterrupt <= 0)
-            {
-                machine.TickInterrupt();
-                cyclesUntilInterrupt += (int)(machine.Profile.ClockHz / machine.Interrupts.Hertz);
-            }
-
-            if (ContainsText(machine, text))
-                return;
-        }
-
-        throw new Xunit.Sdk.XunitException($"ROM did not display '{text}'.");
-    }
-
-    private static void RunForCycles(Cp500Machine machine, int targetCycles)
-    {
-        int cyclesUntilInterrupt = (int)(machine.Profile.ClockHz / machine.Interrupts.Hertz);
-        for (int cycles = 0; cycles < targetCycles;)
-        {
-            int instructionCycles = machine.Step();
-            cycles += instructionCycles;
-            cyclesUntilInterrupt -= instructionCycles;
-            if (cyclesUntilInterrupt <= 0)
-            {
-                machine.TickInterrupt();
-                cyclesUntilInterrupt += (int)(machine.Profile.ClockHz / machine.Interrupts.Hertz);
-            }
-        }
-    }
-
-    private static void PressKey(Cp500Machine machine, int row, int column)
-    {
-        machine.Keyboard.SetKeyState(row, column, pressed: true);
-        RunForCycles(machine, 100_000);
-        machine.Keyboard.SetKeyState(row, column, pressed: false);
-        RunForCycles(machine, 100_000);
+            '\r' => (6, 0),
+            ' ' => (6, 7),
+            >= '0' and <= '7' => (4, key - '0'),
+            '8' => (5, 0),
+            '9' => (5, 1),
+            >= 'A' and <= 'G' => (0, key - 'A' + 1),
+            >= 'H' and <= 'O' => (1, key - 'H'),
+            >= 'P' and <= 'W' => (2, key - 'P'),
+            >= 'X' and <= 'Z' => (3, key - 'X'),
+            _ => throw new ArgumentOutOfRangeException(nameof(key), key, "No CP-500 matrix position.")
+        };
     }
 
     [Fact]
@@ -178,7 +184,7 @@ public sealed class Cp500MachineTests
         Assert.Equal(0xC3, machine.Memory.Read(0x0000));
         Assert.Equal(0x42, machine.Memory.Read(0x4000));
         Assert.Equal(0xFF, machine.Memory.Read(0x8000));
-        Assert.Equal(0xFB, machine.Memory.Read(0x3801));
+        Assert.Equal(0x04, machine.Memory.Read(0x3801));
         Assert.Equal(new[] { (Column: 1, Row: 1, Character: (byte)'X') }, changes);
         Assert.Equal(1, machine.Cpu.InterruptMode);
     }
@@ -215,22 +221,6 @@ public sealed class Cp500MachineTests
     }
 
     [Fact]
-    public void InterruptLatchPresentsHeartbeatAndAcknowledgesOnStatusRead()
-    {
-        var interrupt = new Cp500InterruptDevice(80);
-        int callbacks = 0;
-        interrupt.SetInterruptCallback(() => callbacks++);
-
-        interrupt.Tick();
-
-        byte status = interrupt.In(Cp500InterruptDevice.Port);
-
-        Assert.Equal(1, callbacks);
-        Assert.True((status & 0x81) == 0x81);
-        Assert.False(interrupt.InterruptPending);
-    }
-
-    [Fact]
     public void RtcExposesBcdTimeAndAcceptsBcdWrites()
     {
         var rtc = new Cp500RtcDevice();
@@ -261,25 +251,138 @@ public sealed class Cp500MachineTests
     }
 }
 
-public sealed class Wd1791ControllerTests
+public sealed class Cp500PortMapTests
 {
+    private static Cp500Machine CreateMachine(byte[]? rom = null, IModelIIIDiskImageProvider? images = null) =>
+        new(Cp500MachineProfile.Original, rom ?? new byte[Cp500MachineProfile.SystemRomSizeBytes], images);
+
     [Fact]
-    public void RegistersAtModelThreePortsE0ThroughE3()
+    public void E0ReportsTimerIrqActiveLowUntilEcAcknowledgesIt()
+    {
+        var machine = CreateMachine();
+        machine.IoBus.Out(0xE0, 0x04);
+
+        machine.TickInterrupt();
+
+        Assert.Equal(0xFB, machine.IoBus.In(0xE0));
+        Assert.Equal(0xFB, machine.IoBus.In(0xE3));
+        Assert.Equal(0x00, machine.IoBus.In(0xEC));
+        Assert.Equal(0xFF, machine.IoBus.In(0xE0));
+    }
+
+    [Fact]
+    public void MaskedTimerIrqReadsInactive()
+    {
+        var machine = CreateMachine();
+        machine.IoBus.Out(0xE0, 0x00);
+
+        machine.TickInterrupt();
+
+        Assert.Equal(0xFF, machine.IoBus.In(0xE0));
+    }
+
+    [Fact]
+    public void FfIsACassetteStubThatLeavesInterruptsAlone()
+    {
+        var machine = CreateMachine();
+        machine.IoBus.Out(0xE0, 0x04);
+        machine.TickInterrupt();
+
+        machine.IoBus.Out(0xFF, 0x00);
+
+        Assert.Equal(0x00, machine.IoBus.In(0xFF));
+        Assert.Equal(0xFB, machine.IoBus.In(0xE0));
+    }
+
+    [Fact]
+    public void F0ThroughF3AreTheWd1791Registers()
     {
         var images = new MemoryModelIIIDiskImageProvider();
         images.MountBlank(0);
-        var controller = new Wd1791Controller(images);
-        var bus = new IoBus();
-        controller.Register(bus);
+        var machine = CreateMachine(images: images);
+        machine.IoBus.Out(0xF4, 0x01);
 
-        bus.Out(0xE1, 2);
-        bus.Out(0xE2, 1);
-        bus.Out(0xE0, 0x80);
+        machine.IoBus.Out(0xF1, 2);
+        machine.IoBus.Out(0xF2, 1);
+        machine.IoBus.Out(0xF0, 0x80);
 
-        Assert.Equal(2, controller.Track);
-        Assert.True(controller.DataRequest);
-        Assert.Equal(controller.Status, bus.In(0xE0));
+        Assert.Equal(2, machine.IoBus.In(0xF1));
+        Assert.Equal(1, machine.IoBus.In(0xF2));
+        Assert.Equal(0x03, machine.IoBus.In(0xF0));
     }
+
+    [Fact]
+    public void E4MasksFdcIntrqIntoActiveLowNmiStatus()
+    {
+        var images = new MemoryModelIIIDiskImageProvider();
+        images.MountBlank(0);
+        var machine = CreateMachine(images: images);
+        machine.IoBus.Out(0xF4, 0x01);
+
+        machine.IoBus.Out(0xE4, 0x80);
+        machine.IoBus.Out(0xF0, 0x00);
+
+        Assert.Equal(0x7F, machine.IoBus.In(0xE4));
+        Assert.Equal(0xFF, machine.IoBus.In(0xE7));
+    }
+
+    [Fact]
+    public void F4SelectsTheDriveAndE4DoesNot()
+    {
+        var images = new MemoryModelIIIDiskImageProvider();
+        images.MountBlank(1, ModelIIIDiskFormat.DoubleSided);
+        var machine = CreateMachine(images: images);
+
+        machine.IoBus.Out(0xE4, 0x12);
+
+        Assert.False(machine.DiskController.DriveSelected);
+
+        machine.IoBus.Out(0xF4, 0x12);
+
+        Assert.True(machine.DiskController.DriveSelected);
+        Assert.Equal(1, machine.DiskController.SelectedDrive);
+        Assert.Equal(1, machine.DiskController.SelectedSide);
+    }
+
+    [Fact]
+    public void F4ReadsToggleRomAddressLineA11()
+    {
+        byte[] rom = new byte[Cp500MachineProfile.SystemRomSizeBytes];
+        rom[0x0000] = 0x10;
+        rom[0x0800] = 0x18;
+        rom[0x3000] = 0x30;
+        rom[0x3800] = 0x38;
+        var machine = CreateMachine(rom);
+
+        Assert.Equal(0x30, machine.Memory.Read(0x3000));
+        Assert.Equal(0x00, machine.IoBus.In(0xF4));
+        Assert.Equal(0x38, machine.Memory.Read(0x3000));
+        Assert.Equal(0x18, machine.Memory.Read(0x0000));
+        Assert.Equal(0x18, machine.Memory.Read(0x0800));
+        Assert.Equal(0x00, machine.Memory.Read(0x3800));
+
+        Assert.Equal(0x00, machine.IoBus.In(0xF7));
+        Assert.Equal(0x30, machine.Memory.Read(0x3000));
+        Assert.Equal(0x10, machine.Memory.Read(0x0000));
+    }
+
+    [Fact]
+    public void ResetRestoresTheUnforcedRomView()
+    {
+        byte[] rom = new byte[Cp500MachineProfile.SystemRomSizeBytes];
+        rom[0x3000] = 0x30;
+        rom[0x3800] = 0x38;
+        var machine = CreateMachine(rom);
+        machine.IoBus.In(0xF4);
+
+        machine.Reset();
+
+        Assert.Equal(0x30, machine.Memory.Read(0x3000));
+    }
+}
+
+public sealed class Wd1791ControllerTests
+{
 
     [Fact]
     public void DiskControlMirrorsF4ThroughF7AndSurfacesHandshakeState()
@@ -298,11 +401,10 @@ public sealed class Wd1791ControllerTests
 
         bus.Out(0xF7, 0x58);
 
-        Assert.Equal(0x58, bus.In(0xF5));
         Assert.Equal(3, controller.SelectedDrive);
         Assert.Equal(1, controller.SelectedSide);
         Assert.True(control.WaitRequested);
-        Assert.True(control.WaitActive);
+        Assert.False(control.WaitActive);
 
         bus.Out(0xF2, 1);
         bus.Out(0xF0, 0x80);
@@ -440,5 +542,111 @@ public sealed class Wd1791ControllerTests
         Assert.False(controller.DataRequest);
         Assert.True(controller.InterruptRequest);
         Assert.True((controller.Status & 0x10) != 0);
+    }
+
+    [Fact]
+    public void InterruptFabricUsesActiveLowMasksAndZ80NmiVector()
+    {
+        byte[] rom = new byte[Cp500MachineProfile.SystemRomSizeBytes];
+        var machine = new Cp500Machine(Cp500MachineProfile.M80, rom);
+        machine.SetRomOverlay(false);
+        machine.Cpu.PC = 0x1234;
+        machine.Cpu.SP = 0x8000;
+        machine.Interrupts.WriteNmiMask(Cp500InterruptDevice.NmiReset);
+
+        machine.Interrupts.RequestResetNmi();
+        byte status = machine.Interrupts.ReadNmiStatus();
+
+        Assert.Equal(0x0066, machine.Cpu.PC);
+        Assert.Equal(0x7FFE, machine.Cpu.SP);
+        Assert.Equal(0x34, machine.Memory.Read(0x7FFE));
+        Assert.Equal(0x12, machine.Memory.Read(0x7FFF));
+        Assert.Equal(0xDF, status);
+    }
+
+    [Fact]
+    public void TimedWd1791DelaysDrqAndReportsLostData()
+    {
+        var images = new MemoryModelIIIDiskImageProvider();
+        images.MountBlank(0);
+        var controller = new Wd1791Controller(images, new Wd1791Timing(CommandDelayCycles: 10, ByteWindowCycles: 5));
+
+        controller.Out(Wd1791Controller.SectorPort, 1);
+        controller.Out(Wd1791Controller.CommandStatusPort, 0x80);
+
+        Assert.True((controller.Status & Wd1791Controller.StatusBusy) != 0);
+        Assert.False(controller.DataRequest);
+
+        controller.AdvanceCycles(10);
+
+        Assert.True(controller.DataRequest);
+
+        controller.AdvanceCycles(5);
+
+        Assert.False(controller.DataRequest);
+        Assert.True(controller.InterruptRequest);
+        Assert.True((controller.Status & Wd1791Controller.StatusLostData) != 0);
+    }
+
+    [Fact]
+    public void Wd1791SupportsReadAddressReadTrackAndWriteTrack()
+    {
+        var images = new MemoryModelIIIDiskImageProvider();
+        images.MountBlank(0);
+        var controller = new Wd1791Controller(images);
+
+        controller.Out(Wd1791Controller.SectorPort, 1);
+        controller.Out(Wd1791Controller.CommandStatusPort, 0xC0);
+        byte[] address = Enumerable.Range(0, 6).Select(_ => controller.In(Wd1791Controller.DataPort)).ToArray();
+
+        Assert.Equal(new byte[] { 0, 0, 1, 1, 0, 0 }, address);
+
+        controller.Out(Wd1791Controller.CommandStatusPort, 0xF0);
+        for (int index = 0; index < ModelIIIDiskGeometry.SectorsPerTrack * ModelIIIDiskGeometry.BytesPerSector; index++)
+            controller.Out(Wd1791Controller.DataPort, (byte)(index & 0xFF));
+
+        controller.Out(Wd1791Controller.CommandStatusPort, 0xE0);
+
+        Assert.Equal(0, controller.In(Wd1791Controller.DataPort));
+        Assert.Equal(1, controller.In(Wd1791Controller.DataPort));
+    }
+
+    [Fact]
+    public void DiskCodecsRoundTripRawJv3AndDmkWithMetadata()
+    {
+        var image = ModelIIIDiskImage.CreateBlank(ModelIIIDiskFormat.SingleSided);
+        image.FindSector(0, 0, 1)!.Data[0] = 0xA5;
+
+        foreach (var kind in new[] { ModelIIIDiskImageKind.Raw, ModelIIIDiskImageKind.Jv3, ModelIIIDiskImageKind.Dmk })
+        {
+            byte[] serialized = ModelIIIDiskCodec.Serialize(image, kind);
+            var parsed = ModelIIIDiskCodec.Parse(serialized, kind);
+
+            Assert.Equal(0xA5, parsed.FindSector(0, 0, 1)!.Data[0]);
+            Assert.True(parsed.TryGetFirstHeader(0, 0, out var header));
+            Assert.Equal(1, header.Id);
+        }
+
+        Assert.Throws<InvalidDataException>(() => ModelIIIDiskCodec.Parse(new byte[123], ModelIIIDiskImageKind.Raw));
+    }
+
+    [Fact]
+    public void VideoControlSelects32ColumnAndBit7FallbackWithoutMutatingVram()
+    {
+        var video = new Cp500VideoDevice();
+        video.WriteCharacter(2, 0, 0xC1);
+        byte before = video.ReadCharacter(2, 0);
+
+        video.Out(Cp500VideoDevice.ControlPort, 0x04);
+        var normal = video.GetRenderedCell(1, 0);
+        video.Out(Cp500VideoDevice.ControlPort, 0x0C);
+        var alternate = video.GetRenderedCell(1, 0);
+
+        Assert.Equal(32, video.VisibleColumns);
+        Assert.Equal(before, video.ReadCharacter(2, 0));
+        Assert.True(normal.Inverse);
+        Assert.False(normal.Graphics);
+        Assert.True(alternate.Graphics);
+        Assert.False(alternate.Inverse);
     }
 }

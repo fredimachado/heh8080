@@ -9,6 +9,7 @@
 - [plans/emulator-implementation.md](plans/emulator-implementation.md) - CP/M architecture and validation scope
 - [plans/phase5-terminal.md](plans/phase5-terminal.md) - ADM-3A terminal with CRT effects
 - [plans/cp500-emulation.md](plans/cp500-emulation.md) - CP-500 foundation status and remaining integration plan
+- [plans/cp500-compatibility-remediation.md](plans/cp500-compatibility-remediation.md) - Ordered plan for Model III compatibility gaps
 
 ## Core
 - [core/cpu.md](core/cpu.md) - 8080 CPU implementation details

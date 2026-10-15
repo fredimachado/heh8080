@@ -21,11 +21,7 @@ public sealed class Cp500Machine
         if (systemRom.Length == 0)
             throw new ArgumentException("A CP-500 system ROM is required.", nameof(systemRom));
 
-        byte[] romImage = new byte[Cp500MachineProfile.SystemRomSizeBytes];
-        Array.Fill(romImage, (byte)0xFF);
-        systemRom[..Math.Min(systemRom.Length, romImage.Length)].CopyTo(romImage);
-
-        Rom = new RomMemoryRegion(0x0000, romImage);
+        Rom = new Cp500SystemRom(systemRom);
         Keyboard = new Cp500KeyboardDevice();
         KeyboardRegion = new KeyboardMatrixRegion(
             Cp500KeyboardDevice.StartAddress,
@@ -49,16 +45,22 @@ public sealed class Cp500Machine
         DiskImages = diskImages ?? new MemoryModelIIIDiskImageProvider();
         DiskController = new Wd1791Controller(DiskImages);
         DiskControl = new Cp500DiskControlDevice(DiskController);
-        Interrupts = new Cp500InterruptDevice();
+        Interrupts = new Cp500InterruptDevice(clockHz: profile.ClockHz);
         Printer = new Cp500PrinterPort(printer);
         Rs232 = new Cp500Rs232Device(rs232);
+        Cassette = new Cp500CassettePort();
 
-        DiskController.Register(IoBus);
-        DiskControl.Register(IoBus);
         Interrupts.Register(IoBus);
-        Printer.Register(IoBus);
         Rs232.Register(IoBus);
+        Video.Register(IoBus);
+        DiskController.Register(IoBus);
+        Rom.Register(IoBus);
+        DiskControl.Register(IoBus);
+        Printer.Register(IoBus);
+        Cassette.Register(IoBus);
         Interrupts.SetInterruptCallback(() => Cpu.Interrupt(0xFF));
+        Interrupts.SetNmiCallback(Cpu.NonMaskableInterrupt);
+        DiskController.InterruptRequestChanged += Interrupts.SetFdcInterruptRequest;
 
         Throttle = new CycleThrottle(Profile.ClockHz);
         Reset();
@@ -76,8 +78,8 @@ public sealed class Cp500Machine
     /// <summary>CP-500 I/O bus.</summary>
     public IoBus IoBus { get; }
 
-    /// <summary>Read-only system ROM, overlaid by keyboard and video ranges.</summary>
-    public RomMemoryRegion Rom { get; }
+    /// <summary>System EPROM and its F4h-F7h A11 flip-flop, overlaid by keyboard and video ranges.</summary>
+    public Cp500SystemRom Rom { get; }
 
     /// <summary>Installed RAM region. A 64 KiB M80/M80C profile uses full-address-space underlay RAM.</summary>
     public RamMemoryRegion Ram { get; }
@@ -97,8 +99,11 @@ public sealed class Cp500Machine
     /// <summary>Memory-mapped real-time clock.</summary>
     public Cp500RtcDevice Rtc { get; }
 
-    /// <summary>Heartbeat interrupt latch.</summary>
+    /// <summary>IRQ and NMI masks, status, and the 30 Hz timer.</summary>
     public Cp500InterruptDevice Interrupts { get; }
+
+    /// <summary>Cassette port stub at FFh.</summary>
+    public Cp500CassettePort Cassette { get; }
 
     /// <summary>Model III disk-image storage.</summary>
     public IModelIIIDiskImageProvider DiskImages { get; }
@@ -124,7 +129,10 @@ public sealed class Cp500Machine
     /// <summary>Executes one Z80 instruction and calculates the host delay needed for real-time pacing.</summary>
     public int Step()
     {
+        Cpu.WaitLine = DiskControl.WaitActive;
         int cycles = Cpu.Step();
+        DiskController.AdvanceCycles(cycles);
+        Cpu.WaitLine = DiskControl.WaitActive;
         LastSuggestedDelay = Throttle.GetDelay(cycles);
         return cycles;
     }
@@ -142,6 +150,14 @@ public sealed class Cp500Machine
     /// <summary>Presents one external 30 Hz heartbeat to the machine.</summary>
     public void TickInterrupt() => Interrupts.Tick();
 
+    /// <summary>Advances cycle-driven hardware without fetching a CPU instruction.</summary>
+    public void AdvanceCycles(long cycles)
+    {
+        DiskController.AdvanceCycles(cycles);
+        Interrupts.AdvanceCycles(cycles);
+        Cpu.WaitLine = DiskControl.WaitActive;
+    }
+
     /// <summary>Enables or disables the M80/M80C boot-ROM overlay.</summary>
     public void SetRomOverlay(bool enabled)
     {
@@ -157,12 +173,13 @@ public sealed class Cp500Machine
     /// <summary>Resets CPU-visible hardware without clearing RAM or user-supplied media.</summary>
     public void Reset()
     {
-        Rom.Enabled = true;
+        Rom.Reset();
         Cpu.Reset();
         Cpu.InterruptMode = 1;
         DiskController.Reset();
         DiskControl.Reset();
         Interrupts.Reset();
+        Video.ResetControl();
         Throttle.Reset();
         LastSuggestedDelay = TimeSpan.Zero;
     }

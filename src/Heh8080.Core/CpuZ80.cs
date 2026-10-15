@@ -48,6 +48,12 @@ public sealed class CpuZ80 : ICpu
 
     public bool InterruptsEnabled => IFF1;
 
+    /// <summary>
+    /// External Z80 WAIT input. While asserted, <see cref="Step"/> advances bus
+    /// time without fetching or retiring an instruction.
+    /// </summary>
+    public bool WaitLine { get; set; }
+
     // Memory and I/O
     private readonly IMemory _memory;
     private readonly IIoBus _ioBus;
@@ -109,6 +115,7 @@ public sealed class CpuZ80 : ICpu
         IFF1 = IFF2 = false;
         InterruptMode = 0;
         Halted = false;
+        WaitLine = false;
     }
 
     #region Register Pair Accessors
@@ -248,6 +255,7 @@ public sealed class CpuZ80 : ICpu
 
     public int Step()
     {
+        if (WaitLine) return 4;
         if (Halted) return 4;
 
         byte opcode = FetchByte();
@@ -396,6 +404,20 @@ public sealed class CpuZ80 : ICpu
                 PC = ReadWord(tableAddr);
                 break;
         }
+    }
+
+    /// <summary>
+    /// Presents an edge-triggered Z80 non-maskable interrupt. NMI ignores IFF1,
+    /// pushes the current PC, clears IFF1, preserves the previous maskable
+    /// enable state in IFF2, and vectors to 0066h.
+    /// </summary>
+    public void NonMaskableInterrupt()
+    {
+        IFF2 = IFF1;
+        IFF1 = false;
+        Halted = false;
+        Push(PC);
+        PC = 0x0066;
     }
 
     #endregion

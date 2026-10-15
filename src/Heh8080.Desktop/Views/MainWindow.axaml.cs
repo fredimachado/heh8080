@@ -26,7 +26,6 @@ public partial class MainWindow : Window
 
         // Handle exit button click
         MainView.ExitRequested += () => Close();
-        MainView.Cp500KeyInput += () => (DataContext as MainViewModel)?.NotifyCp500KeyInput();
 
         // Ensure terminal always has focus for keyboard input
         Activated += (s, e) => MainView.FocusTerminal();

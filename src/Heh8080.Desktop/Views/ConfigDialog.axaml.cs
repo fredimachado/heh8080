@@ -134,7 +134,7 @@ public partial class ConfigDialog : Window
         {
             await _viewModel.SwitchMachineProfile(profile);
             StatusLabel.Text = profile == DesktopMachineProfile.Cp500
-                ? "CP-500: cp500/CP500-1.BIN"
+                ? "CP-500: cp500/cp500.rom"
                 : "CP/M profile running";
         }
         catch (Exception ex)

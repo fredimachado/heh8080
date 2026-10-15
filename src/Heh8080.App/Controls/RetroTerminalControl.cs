@@ -79,7 +79,6 @@ public class RetroTerminalControl : Control
     /// Event fired when the exit button is clicked.
     /// </summary>
     public event Action? ExitClicked;
-    public event Action? Cp500KeyInput;
 
     // Exit button area
     private Rect _exitButtonRect;
@@ -97,7 +96,7 @@ public class RetroTerminalControl : Control
     private static readonly Color ScreenBezelColor = Color.FromRgb(0x50, 0x50, 0x48);  // Inner bezel base
     private static readonly Color ScreenBezelShadow = Color.FromRgb(0x30, 0x30, 0x28);  // Inner bezel shadow
     private static readonly Color ScreenBezelHighlight = Color.FromRgb(0x68, 0x68, 0x60);  // Inner bezel highlight
-    private static readonly TimeSpan Cp500KeyPulseDuration = TimeSpan.FromMilliseconds(200);
+    private static readonly TimeSpan Cp500KeyPulseDuration = TimeSpan.FromMilliseconds(50);
 
     private SKTypeface? _typeface;
 
@@ -554,7 +553,6 @@ public class RetroTerminalControl : Control
                     Cp500DiagnosticTrace.Write(
                         $"text-input char=U+{(int)character:X4} row={row} column={column} shift={shift}");
                     PulseCp500Key(row, column, shift);
-                    Cp500KeyInput?.Invoke();
                     e.Handled = true;
                 }
             }
@@ -586,7 +584,6 @@ public class RetroTerminalControl : Control
                 {
                     Cp500DiagnosticTrace.Write($"special-key-down key={e.Key} row={row} column={column}");
                     PulseCp500Key(row, column, shift: false);
-                    Cp500KeyInput?.Invoke();
                 }
                 e.Handled = true;
             }
@@ -686,14 +683,10 @@ public class RetroTerminalControl : Control
 
         byte selectedRow = (byte)(1 << pulse.Value.Row);
         byte pressedColumn = (byte)(1 << pulse.Value.Column);
-        if ((rowMask & selectedRow) == 0 || (value & pressedColumn) != 0)
+        if ((rowMask & selectedRow) == 0 || (value & pressedColumn) == 0)
             return;
 
-        if (Interlocked.Increment(ref _cp500PulseScanCount) == 3)
-        {
-            int generation = _cp500PulseGeneration;
-            Dispatcher.UIThread.Post(() => EndCp500Pulse(generation, pulse.Value));
-        }
+        Interlocked.Increment(ref _cp500PulseScanCount);
     }
 
     private void EndCp500Pulse(int generation, (int Row, int Column, bool Shift) pulse)

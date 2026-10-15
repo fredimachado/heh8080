@@ -3,7 +3,7 @@ using Heh8080.Core;
 namespace Heh8080.Devices;
 
 /// <summary>
-/// Host-facing CP-500 8-by-8 active-low keyboard matrix.
+/// Host-facing CP-500 8-by-8 active-high keyboard matrix.
 /// The machine maps this device over 3800h-3BFFh.
 /// </summary>
 public sealed class Cp500KeyboardDevice

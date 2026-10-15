@@ -20,8 +20,6 @@ public enum DesktopMachineProfile
 
 public partial class MainViewModel : ViewModelBase, IDisposable
 {
-    private const int Cp500InputSettleCycles = 100_000;
-
     private Emulator _emulator;
     private readonly IDiskImageProvider _diskProvider;
     private readonly Adm3aTerminal _terminal;
@@ -30,10 +28,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private Cp500Machine? _cp500Machine;
     private CancellationTokenSource? _cp500Cancellation;
     private Task? _cp500RunTask;
-    private bool _cp500BootGateActive;
-    private volatile bool _cp500BootPaused;
-    private int _cp500ThrottleRebaseRequested;
-    private int _cp500InputSettleCyclesRemaining;
 
     // Devices
     private readonly ConsolePortHandler _console;
@@ -160,76 +154,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    public void NotifyCp500KeyInput()
-    {
-        Cp500DiagnosticTrace.Write("host-key-input");
-        if (_cp500BootGateActive)
-        {
-            Interlocked.Exchange(ref _cp500ThrottleRebaseRequested, 1);
-            Interlocked.Exchange(ref _cp500InputSettleCyclesRemaining, Cp500InputSettleCycles);
-            _cp500BootPaused = false;
-        }
-    }
-
-    private static string? GetCp500Prompt(Cp500Machine machine)
-    {
-        for (int row = Cp500VideoDevice.Rows - 1; row >= 0; row--)
-        {
-            if (ContainsCp500TextAtRow(machine, row, "Mem. usada ?"))
-                return $"Mem. usada ?@{row}";
-            if (ContainsCp500TextAtRow(machine, row, "Cass?"))
-                return $"Cass?@{row}";
-        }
-
-        return null;
-    }
-
-    private static bool ContainsCp500TextAtRow(Cp500Machine machine, int row, string text)
-    {
-        for (int column = 0; column <= Cp500VideoDevice.Columns - text.Length; column++)
-        {
-            bool matches = true;
-            for (int index = 0; index < text.Length; index++)
-            {
-                if (machine.Video.ReadCharacter(column + index, row) != text[index])
-                {
-                    matches = false;
-                    break;
-                }
-            }
-
-            if (matches)
-                return true;
-        }
-
-        return false;
-    }
-
-    private static bool ContainsCp500Text(Cp500Machine machine, string text)
-    {
-        for (int row = 0; row < Cp500VideoDevice.Rows; row++)
-        {
-            for (int column = 0; column <= Cp500VideoDevice.Columns - text.Length; column++)
-            {
-                bool matches = true;
-                for (int index = 0; index < text.Length; index++)
-                {
-                    if (machine.Video.ReadCharacter(column + index, row) != text[index])
-                    {
-                        matches = false;
-                        break;
-                    }
-                }
-
-                if (matches)
-                    return true;
-            }
-        }
-
-        return false;
-    }
-
-
     private void WriteToTerminal(string text)
     {
         foreach (char c in text)
@@ -288,9 +212,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             await StopCp500Async();
             _cp500Machine!.Keyboard.ReleaseAll();
             _cp500Machine.Reset();
-            _cp500BootGateActive = true;
-            _cp500BootPaused = false;
-            _cp500InputSettleCyclesRemaining = 0;
             StartCp500();
             StatusText = "CP-500 reset";
             return;
@@ -381,7 +302,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             if (_cp500Rom is not { Length: > 0 })
                 throw new InvalidOperationException(
-                    "CP-500 ROM not found. Supply cp500/CP500-1.BIN and restart the app.");
+                    "CP-500 ROM not found. Supply cp500/cp500.rom and restart the app.");
 
             await _emulator.StopAsync();
             StopInterruptTimer();
@@ -392,9 +313,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             }
             _cp500Machine.Reset();
             Cp500DiagnosticTrace.Write("machine-reset profile=original");
-            _cp500BootGateActive = true;
-            _cp500BootPaused = false;
-            _cp500InputSettleCyclesRemaining = 0;
             MachineProfile = profile;
             MachineProfileChanged?.Invoke();
             StartCp500();
@@ -425,37 +343,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                if (_cp500BootPaused)
-                {
-                    await Task.Delay(25, cancellationToken).ConfigureAwait(false);
-                    continue;
-                }
-
-                if (Interlocked.Exchange(ref _cp500ThrottleRebaseRequested, 0) != 0)
-                {
-                    machine.Throttle.Reset();
-                    Cp500DiagnosticTrace.Write("throttle-rebased");
-                }
-
                 const int batchCycleLimit = 2048;
                 int executedCycles = 0;
                 for (; executedCycles < batchCycleLimit && !cancellationToken.IsCancellationRequested;)
                     executedCycles += machine.Step();
-
-                if (_cp500BootGateActive && !machine.Keyboard.HasPressedKeys &&
-                    ConsumeCp500InputSettleCycles(executedCycles))
-                {
-                    if (ContainsCp500Text(machine, "READY"))
-                    {
-                        _cp500BootGateActive = false;
-                        Cp500DiagnosticTrace.Write("boot-gate-complete prompt=READY");
-                    }
-                    else if (GetCp500Prompt(machine) is { } prompt)
-                    {
-                        _cp500BootPaused = true;
-                        Cp500DiagnosticTrace.Write($"boot-paused prompt={prompt}");
-                    }
-                }
 
                 long now = Stopwatch.GetTimestamp();
                 while (now >= nextHeartbeat)
@@ -486,24 +377,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             Cp500DiagnosticTrace.Write($"matrix-state row={row} column={column} pressed={pressed}");
         machine.Keyboard.Matrix.ReadObserved += (rowMask, value) =>
         {
-            if (machine.Keyboard.HasPressedKeys || value != byte.MaxValue)
+            if (machine.Keyboard.HasPressedKeys || value != 0)
                 Cp500DiagnosticTrace.Write($"matrix-read mask={rowMask:X2} value={value:X2}");
         };
-    }
-
-    private bool ConsumeCp500InputSettleCycles(int executedCycles)
-    {
-        int remaining = Volatile.Read(ref _cp500InputSettleCyclesRemaining);
-        if (remaining <= 0)
-            return true;
-
-        int updated = Interlocked.Add(ref _cp500InputSettleCyclesRemaining, -executedCycles);
-        if (updated > 0)
-            return false;
-
-        Interlocked.Exchange(ref _cp500InputSettleCyclesRemaining, 0);
-        Cp500DiagnosticTrace.Write("input-settle-complete");
-        return true;
     }
 
     private async Task StopCp500Async()

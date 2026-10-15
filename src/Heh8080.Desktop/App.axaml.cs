@@ -157,7 +157,7 @@ public partial class App : Application
             var directory = new DirectoryInfo(start);
             while (directory != null)
             {
-                string path = Path.Combine(directory.FullName, "cp500", "CP500-1.BIN");
+                string path = Path.Combine(directory.FullName, "cp500", "cp500.rom");
                 if (File.Exists(path))
                     return File.ReadAllBytes(path);
 

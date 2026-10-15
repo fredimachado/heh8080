@@ -137,3 +137,35 @@ Port is locked until magic byte AAh is written.
 ## Unassigned Ports
 
 All unassigned ports return FFh on read and ignore writes.
+
+## CP-500 / Model III overlay ports
+
+The reusable `Cp500Machine` has a separate I/O map from the CP/M devices above,
+taken from the standard Model III map (MAME `trs80m3`). Its split `IoBus`
+assigns read and write handlers separately; every range has exactly one read
+owner and one write owner, and there are no alias ranges.
+
+| Ports | IN | OUT | Owner (IN / OUT) |
+|-------|----|-----|------------------|
+| E0-E3 | `~(irqMask & irqPending)`, active low. Sources stay latched | IRQ mask (bit 2 = 30 Hz timer; cassette/RS-232 bits accepted, never asserted) | `Cp500InterruptDevice` |
+| E4-E7 | `~(nmiMask & nmiPending)`, then clears NMI pending | NMI mask (bit 7 FDC INTRQ, bit 6 motor timeout) | `Cp500InterruptDevice` |
+| E8-EB | RS-232 status/data stub | RS-232 control/data stub | `Cp500Rs232Device` |
+| EC-EF | Acknowledges the timer IRQ (clears only bit 2 pending), returns 00h | Video/misc control latch | `Cp500InterruptDevice` / `Cp500VideoDevice` |
+| F0-F3 | WD1791 status, track, sector, data | WD1791 command, track, sector, data | `Wd1791Controller` |
+| F4-F7 | Toggles the ROM A11 flip-flop, returns 00h | Drive select (bits 0-3), side (4), WAIT (6), MFM (7) | `Cp500SystemRom` / `Cp500DiskControlDevice` |
+| F8 | Printer status | Printer data | `Cp500PrinterPort` |
+| FF | 00h, no side effects (no cassette attached) | Ignored | `Cp500CassettePort` |
+
+```csharp
+machine.IoBus.Out(0xE0, 0x04); // enable the 30 Hz timer IRQ
+machine.TickInterrupt();
+_ = machine.IoBus.In(0xE0);    // FBh: timer pending (active low)
+_ = machine.IoBus.In(0xEC);    // acknowledges the timer; IN E0 now reads FFh
+machine.IoBus.Out(0xF4, 0x41); // drive 0 + WAIT request
+_ = machine.IoBus.In(0xF4);    // toggles Rom.A11Forced
+```
+
+Contracts: F4-F7 reads never change disk selection, F4-F7 writes never change
+the ROM view, FDC INTRQ is routed through `Cp500InterruptDevice`, and cassette
+interrupt/audio transport remains intentionally inactive. The ROM's IM 1
+handler reads E0 to find the source, then reads EC to acknowledge the timer.

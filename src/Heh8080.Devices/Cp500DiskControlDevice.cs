@@ -3,19 +3,17 @@ using Heh8080.Core;
 namespace Heh8080.Devices;
 
 /// <summary>
-/// Model III disk-control latch mirrored across F4h-F7h.
+/// Model III write-only disk-control latch mirrored across F4h-F7h.
 /// It selects a drive/head and exposes WD1791 handshaking without coupling devices to a CPU implementation.
+/// Reads of F4h-F7h belong to the CP-500 ROM A11 flip-flop.
 /// </summary>
 public sealed class Cp500DiskControlDevice : IIoDevice
 {
     /// <summary>First mirrored disk-control port.</summary>
-    public const byte ControlPort = 0xE4;
+    public const byte ControlPort = 0xF4;
 
     /// <summary>Last mirrored disk-control port.</summary>
-    public const byte LastControlPort = 0xE7;
-
-    private const byte LegacyControlPort = 0xF4;
-    private const byte LegacyLastControlPort = 0xF7;
+    public const byte LastControlPort = 0xF7;
 
     private readonly Wd1791Controller _controller;
     private bool _waitActive;
@@ -61,12 +59,11 @@ public sealed class Cp500DiskControlDevice : IIoDevice
     /// <summary>Raised whenever the host-facing WAIT state changes.</summary>
     public event Action<bool>? WaitActiveChanged;
 
-    /// <summary>Registers the mirrored control latch at E4h-E7h, retaining F4h-F7h as a compatibility alias.</summary>
+    /// <summary>Registers the write side of F4h-F7h.</summary>
     public void Register(IoBus bus)
     {
         ArgumentNullException.ThrowIfNull(bus);
-        bus.Register(this, ControlPort, LastControlPort);
-        bus.Register(this, LegacyControlPort, LegacyLastControlPort);
+        bus.RegisterOutput(this, ControlPort, LastControlPort);
     }
 
     /// <summary>Resets the latch and disconnects all disk drives without changing mounted media.</summary>
@@ -82,8 +79,8 @@ public sealed class Cp500DiskControlDevice : IIoDevice
             ControlLatchChanged?.Invoke(ControlLatch);
     }
 
-    /// <summary>Reads the current latched control state from any F4h-F7h mirror.</summary>
-    public byte In(byte port) => IsControlPort(port) ? ControlLatch : (byte)0xFF;
+    /// <summary>The latch is write-only.</summary>
+    public byte In(byte port) => 0xFF;
 
     /// <summary>Writes the control latch through any F4h-F7h mirror.</summary>
     public void Out(byte port, byte value)
@@ -103,7 +100,7 @@ public sealed class Cp500DiskControlDevice : IIoDevice
         }
 
         _controller.SelectSide(SelectedSide);
-        SetWaitActive(WaitRequested && !_controller.DataRequest && !_controller.InterruptRequest);
+        SetWaitActive(ShouldAssertWait());
         ControlLatchChanged?.Invoke(ControlLatch);
     }
 
@@ -132,9 +129,14 @@ public sealed class Cp500DiskControlDevice : IIoDevice
         WaitActiveChanged?.Invoke(value);
     }
 
-    private static bool IsControlPort(byte port) =>
-        port is >= ControlPort and <= LastControlPort ||
-        port is >= LegacyControlPort and <= LegacyLastControlPort;
+    private bool ShouldAssertWait() =>
+        WaitRequested &&
+        DriveSelectMask != 0 &&
+        (_controller.Status & Wd1791Controller.StatusBusy) != 0 &&
+        !_controller.DataRequest &&
+        !_controller.InterruptRequest;
+
+    private static bool IsControlPort(byte port) => port is >= ControlPort and <= LastControlPort;
 
     private static int GetLowestSelectedDrive(byte driveMask)
     {

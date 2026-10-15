@@ -193,7 +193,7 @@ public sealed class VideoRamRegion : RamMemoryRegion
 }
 
 /// <summary>
-/// Active-low 8-by-8 keyboard matrix.
+/// Active-high 8-by-8 keyboard matrix: a pressed key reads as a 1 bit.
 /// </summary>
 public sealed class KeyboardMatrix
 {
@@ -201,40 +201,28 @@ public sealed class KeyboardMatrix
     private const int ColumnCount = 8;
     private readonly byte[] _rows = new byte[RowCount];
 
-    /// <summary>Raised when the CPU reads a row-selection mask and its active-low value.</summary>
+    /// <summary>Raised when the CPU reads a row-selection mask and its active-high value.</summary>
     public event Action<byte, byte>? ReadObserved;
-
-    public KeyboardMatrix()
-    {
-        Array.Fill(_rows, byte.MaxValue);
-    }
 
     /// <summary>Marks one key as pressed or released.</summary>
     public void SetKeyState(int row, int column, bool pressed)
     {
         ValidatePosition(row, column);
         byte mask = (byte)(1 << column);
-        _rows[row] = pressed ? (byte)(_rows[row] & ~mask) : (byte)(_rows[row] | mask);
+        _rows[row] = pressed ? (byte)(_rows[row] | mask) : (byte)(_rows[row] & ~mask);
     }
 
     /// <summary>Releases every key in the matrix.</summary>
     public void Clear()
     {
-        Array.Fill(_rows, byte.MaxValue);
+        Array.Clear(_rows);
     }
 
     /// <summary>
-    /// Returns the OR of selected active-low rows.
-    /// A zero mask selects no rows and returns the inactive value, <c>FFh</c>.
+    /// Returns the OR of selected rows. A zero mask selects no rows and reads <c>00h</c>.
     /// </summary>
     public byte Read(byte rowMask)
     {
-        if (rowMask == 0)
-        {
-            ReadObserved?.Invoke(rowMask, byte.MaxValue);
-            return byte.MaxValue;
-        }
-
         byte result = 0;
         for (int row = 0; row < RowCount; row++)
         {
@@ -246,7 +234,7 @@ public sealed class KeyboardMatrix
         return result;
     }
 
-    /// <summary>Returns the active-low value of one row.</summary>
+    /// <summary>Returns the active-high value of one row.</summary>
     public byte ReadRow(int row)
     {
         if ((uint)row >= RowCount)
@@ -265,7 +253,7 @@ public sealed class KeyboardMatrix
 }
 
 /// <summary>
-/// Maps an active-low keyboard matrix through address-select row bits.
+/// Maps an active-high keyboard matrix through address-select row bits.
 /// </summary>
 public sealed class KeyboardMatrixRegion : MemoryRegion
 {

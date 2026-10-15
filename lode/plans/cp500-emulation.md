@@ -6,9 +6,9 @@ compatibility with CP-500-specific keyboard/ROM details layered on top.
 
 Status: **Core/Devices foundation and desktop ROM bring-up implemented**. The
 desktop app has CP/M-default profile selection, local ROM discovery, 64x16
-rendering, host key mapping, and a paced Z80/30 Hz heartbeat loop. CP-500 disk
-file codecs, cassette, exact glyph-ROM rendering, and browser integration
-remain planned.
+rendering, host key mapping, and a paced Z80/30 Hz heartbeat loop. The next
+work is CP-500 ROM switching, Model III interrupt/FDC semantics, disk codecs,
+and video control modes. Cassette emulation is explicitly out of scope.
 
 ## Why this is feasible
 
@@ -27,12 +27,12 @@ See [../core/z80.md](../core/z80.md), [../devices/devices.md](../devices/devices
 | ROM | 16 KB socket at `0000–3FFF` | User-supplied CP500 ROM dump; keyboard/video ranges overlay it; never bundle |
 | RAM | 16/32/48 KB at `4000+` | Configurable; `3000–3BFF` is dead space |
 | Video RAM | `3C00–3FFF`, 64×16 chars | Memory-mapped; replaces terminal byte-stream |
-| Keyboard | Matrix at `3800–3BFF` | 8 active-low rows, low-byte select mask, ABNT layout planned |
+| Keyboard | Matrix at `3800–3BFF` | 8 active-high rows (pressed = 1, idle = 00h), low-byte select mask, ABNT layout planned |
 | FDC | WD1791 at `F0–F3`; control at `F4–F7` | Default 40-track SS 18×256 (180 KiB); explicit DS option is 360 KiB |
-| Cassette | 500/1500 baud, port `FF` bit | Optional; dropped by hardware in M80C/Turbo |
+| Cassette | 500/1500 baud, port `FF` bit | Explicitly unsupported; cassette-only signals remain inactive |
 | Printer | Port `F8` | Map to existing `IPrinterDevice` |
 | RS-232 | Ports `E8–EB` | Optional / stub; CP532C adapter on real hw |
-| Interrupts | IM 1 heartbeat 30/80 Hz, port `FF` status/latch | RTC at `4040–4042` |
+| Interrupts | IM 1 timer 30/80 Hz; IRQ mask/status `E0-E3`, NMI `E4-E7`, timer ack `IN EC-EF` | See [../devices/io-ports.md](../devices/io-ports.md) |
 
 ## CP-500 revisions (per pt.wikipedia.org/wiki/CP_500)
 
@@ -72,7 +72,7 @@ graph LR
 
 ## Verified ROM dumps (in repo `cp500/`, git-ignored — never commit)
 
-- `CP500-1.BIN` — 16 KB system ROM (EPROM 27128), mapped at `0000–3FFF`.
+- `cp500.rom` — 16 KB system ROM (EPROM 27128), mapped at `0000–3FFF`.
   - Reset: `F3 AF C3 15 30` (DI, XOR A, JP 3015h); RST vectors jump to RAM hooks `4000h+`.
   - Contains: "PROLOGICA 1981 BASIC", "Mem. usada", "Diskette?", "Cass?", BASIC keyword
     and error tables, "Erro ... na", "READY".
@@ -122,15 +122,14 @@ public interface IMemoryRegion
   also be user supplied.
 
 ### Phase 4 — Keyboard (desktop host complete)
-- `Cp500KeyboardDevice` owns the active-low 8×8 matrix; released keys read as
-  `FFh` and pressed columns clear bits.
+- `Cp500KeyboardDevice` owns the active-high 8x8 matrix; idle rows read 00h
+  and pressed columns set bits.
 - Avalonia text and special keys map to Model III matrix positions; focus loss
   releases all keys.
 - A configurable CP-500 ABNT-specific layout remains future polish.
 
 ### Phase 5 — Interrupts, RTC, misc ports (desktop heartbeat complete)
-- Foundation complete: IM 1 reset configuration, a host-ticked 30/80 Hz `FFh` latch, BCD RTC at `4040–4042`, `F8h` printer adapter, and RS-232 ready/data stub.
-- 30/80 Hz heartbeat latch + status port `FF`; RTC bytes at `4040–4042`.
+- Foundation complete: IM 1 reset configuration, a host-ticked 30/80 Hz timer IRQ (mask/status `E0`, acknowledge `IN EC`), BCD RTC at `4040-4042`, `F8h` printer adapter, RS-232 ready/data stub, and an `FFh` cassette stub.
 - Desktop drives the original profile at 30 Hz from the paced background loop.
 - Printer port `F8` → `IPrinterDevice`; RS-232 stubbed.
 - Deliverable: `TIME$` advances; ROM keyboard auto-repeat works.
@@ -146,11 +145,19 @@ public interface IMemoryRegion
 - Disk image layer: DMK/JV1/JV3 readers mapping to existing `IDiskImageProvider`-style abstraction; extend browser IndexedDB storage.
 - Deliverable: boot TRS-DOS 1.3 / DOS-500 disk image to `DOS READY`.
 
-### Phase 7 — Cassette + polish
-- Port `FF` bit-banged cassette in/out, WAV/CSW loading (1500 baud).
+### Phase 7 — Disk host + polish
+- Add host-owned disk image mount/save support, then browser IndexedDB persistence.
 - Config dialog has CP/M ↔ CP500 selection. RAM/revision/charset controls and a
-  general ROM picker are deferred; desktop discovers `cp500/CP500-1.BIN`.
+  general ROM picker are deferred; desktop discovers `cp500/cp500.rom`.
 - Performance pass; browser WASM validation.
+- Do not add cassette transport, audio, image formats, motor control, or cassette
+  interrupts.
+
+## High-priority compatibility work
+
+The implementation order, device contracts, test boundaries, and explicit
+cassette exclusion are defined in
+[cp500-compatibility-remediation.md](cp500-compatibility-remediation.md).
 
 ## Testing strategy
 
@@ -163,7 +170,7 @@ public interface IMemoryRegion
 
 1. Desktop targets the original 1982 48 KiB CP-500 at 2.03 MHz.
 2. CP/M remains the default profile and can be selected again at runtime.
-3. ROMs remain user supplied; `CP500-1.BIN` is loaded from `cp500/`.
+3. ROMs remain user supplied; `cp500.rom` is loaded from `cp500/`.
 4. Cassette is deferred; later models removed it and disk/ROM bring-up has priority.
 
 ## Legal note

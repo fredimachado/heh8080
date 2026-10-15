@@ -485,3 +485,4 @@ $RECYCLE.BIN/
 
 # CP500 ROM dumps (copyrighted - user-supplied at runtime, never commit)
 cp500/*.BIN
+cp500/*.rom

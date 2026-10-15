@@ -23,7 +23,6 @@ public partial class MainView : UserControl
     /// Event fired when user clicks the exit button.
     /// </summary>
     public event Action? ExitRequested;
-    public event Action? Cp500KeyInput;
     public event Action? DisplaySizeChanged;
 
     public MainView()
@@ -52,7 +51,6 @@ public partial class MainView : UserControl
 
         // Forward exit request to platform code
         Terminal.ExitClicked += () => ExitRequested?.Invoke();
-        Terminal.Cp500KeyInput += () => Cp500KeyInput?.Invoke();
     }
 
     private void ApplyMachineProfile()

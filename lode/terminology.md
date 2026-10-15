@@ -12,6 +12,12 @@
 - **DMA** - Direct Memory Access, buffer address for disk I/O
 - **FCB** - File Control Block, 36-byte structure for file operations
 - **FDC** - Floppy Disk Controller, handles disk I/O via ports 10-17
+- **WD1791** - Western Digital floppy controller used by the CP-500/Model III path
+- **DRQ** - WD1791 Data Request line; a byte can be transferred while active
+- **INTRQ** - WD1791 Interrupt Request line; command completion/error signal routed through interrupt fabric
+- **NMI** - Z80 non-maskable interrupt; CP-500 reset/FDC fabric vectors to 0066h when enabled
+- **WAIT** - Z80 wait input; stalls instruction fetch/retire while hardware cycles continue
+- **JV1/JV3/DMK/raw** - TRS-80/Model III disk image container formats supported by CP-500 codecs
 - **MMU** - Memory Management Unit, handles bank switching via ports 20-23
 - **NativeAOT** - Ahead-of-Time compilation to native code
 - **WASM** - WebAssembly, binary instruction format for web browsers
