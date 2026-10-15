@@ -217,6 +217,77 @@ public sealed class Cp500MachineTests
         Assert.Empty(mismatches);
     }
 
+    [RealRomFact]
+    public void RealRomEchoesEveryCharacterTypedWithUsKeyboardShiftThroughTheHostKeyboard()
+    {
+        var session = BasicReadySession();
+        var host = new Cp500HostKeyboard(session.Machine.Keyboard);
+        var mismatches = new List<string>();
+
+        for (char character = '!'; character <= '~'; character++)
+        {
+            if (!Cp500KeyMap.TryMapCharacter(character, out _))
+                continue;
+
+            session.Press(row: 6, column: 1);
+            session.Run(seconds: 1.5);
+            TypeLikeAUsKeyboard(session, host, character.ToString());
+            string expected = char.ToUpperInvariant(character).ToString();
+            string shown = session.Screen().Trim();
+            if (shown != expected)
+                mismatches.Add($"'{character}' showed \"{shown}\"");
+        }
+
+        Assert.Empty(mismatches);
+    }
+
+    [RealRomFact]
+    public void RealRomBackspaceAfterAShiftedCharacterErasesOnlyThatCharacter()
+    {
+        var session = BasicReadySession();
+        var host = new Cp500HostKeyboard(session.Machine.Keyboard);
+
+        TypeLikeAUsKeyboard(session, host, "PRINT (1+2)");
+        host.KeyDown(HostBackspace, Cp500KeyMap.Map(Cp500HostKey.Backspace));
+        session.Run(seconds: 0.1);
+        host.KeyUp(HostBackspace);
+        session.Run(seconds: 0.5);
+
+        Assert.Contains(">PRINT (1+2\n", session.Screen() + "\n");
+    }
+
+    private const int HostShift = 1;
+    private const int HostCharacter = 2;
+    private const int HostBackspace = 3;
+    private const string UsShiftedCharacters = "~!@#$%^&*()_+{}|:\"<>?";
+
+    private static RealRomSession BasicReadySession()
+    {
+        var session = new RealRomSession(profile: new Cp500MachineProfile(installedDrives: 0));
+        Assert.True(session.RunUntilScreenContains("BASIC (S ou N)", maxSeconds: 10));
+        session.Type("S\r\r");
+        session.Run(seconds: 3);
+        return session;
+    }
+
+    /// <summary>Holds host SHIFT around each character a US keyboard needs it for, as a user's fingers do.</summary>
+    private static void TypeLikeAUsKeyboard(RealRomSession session, Cp500HostKeyboard host, string text)
+    {
+        foreach (char character in text)
+        {
+            Assert.True(Cp500KeyMap.TryMapCharacter(character, out var stroke));
+            bool shifted = UsShiftedCharacters.Contains(character) || char.IsUpper(character);
+            if (shifted)
+                host.KeyDown(HostShift, Cp500KeyMap.Map(Cp500HostKey.Shift));
+            host.KeyDown(HostCharacter, stroke);
+            session.Run(seconds: 0.1);
+            host.KeyUp(HostCharacter);
+            if (shifted)
+                host.KeyUp(HostShift);
+            session.Run(seconds: 0.5);
+        }
+    }
+
     public enum BlankDisk
     {
         Formatted,
