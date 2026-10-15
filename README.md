@@ -8,7 +8,7 @@ Cross-platform Intel 8080 / Zilog Z80 CPU emulator designed to run LOLOS (a CP/M
 
 - **Dual CPU support**: Intel 8080 and Zilog Z80
 - **CP/M compatible I/O**: Console, FDC, MMU, printer, auxiliary, timer
-- **Prológica CP-500 machine** (desktop): Brazilian TRS-80 Model III compatible, booted from your own ROM dumps
+- **Prológica CP-500 machine** (desktop): Brazilian TRS-80 Model III compatible, booted from your own ROM dumps (ROMs not provided, see [ROM files](#rom-files))
 - **Retro CRT terminal**: Authentic 1970s aesthetic with barrel distortion, bloom, scanlines, and vignette
 - **Cross-platform**: Windows, Mac, Linux (NativeAOT), Web (WASM)
 - **Responsive scaling**: 100%, 80%, 60%, 40% with platform-aware defaults
@@ -26,20 +26,34 @@ The CP-500 is a Brazilian personal computer that Prológica built in the early 1
 
 ### ROM files
 
-The CP-500 ROMs are not included. Supply your own dumps, for example from the MAME `cp500` set:
+> [!IMPORTANT]
+> The CP-500 ROMs are not provided with heh8080, and this repository does not contain them. To use the CP-500, you must supply dumps of your own ROMs.
 
-| File | Size | Contents |
+The app needs two ROM files. Rename your dumps to exactly these names, in lowercase:
+
+| File name | Size | Contents |
 |---|---|---|
-| `cp500.rom` | 16 KB | System ROM (BASIC and boot code) |
-| `cp500-chargen.rom` | 2 KB | Character generator |
+| `cp500.rom` | 16,384 bytes | System ROM (BASIC and boot code) |
+| `cp500-chargen.rom` | 2,048 bytes | Character generator |
 
-Put both files in one of these folders:
+Put both files in the same folder. The app looks in these folders, in this order:
 
-- `cp500/` next to the executable
-- `cp500/` in the current directory
-- `%LOCALAPPDATA%\heh8080\`
+1. A `cp500` folder next to the executable (`Heh8080.Desktop.exe`, or `Heh8080.Desktop` on Mac and Linux)
+2. A `cp500` folder in the current directory, for example the repository root when you run `dotnet run --project src/Heh8080.Desktop`
+3. Your local app data folder, `%LOCALAPPDATA%\heh8080\` on Windows (the files go directly in it, without a `cp500` subfolder)
 
-When the app finds both files, it starts in the CP-500 at 100% scale. Otherwise it starts in CP/M. Use `--cpm` to start in CP/M anyway. Click the logo in the top-left corner of the bezel to switch machines or mount disks.
+For example, a portable install looks like this:
+
+```
+Heh8080.Desktop.exe
+cp500/
+  cp500.rom
+  cp500-chargen.rom
+```
+
+The repository's `.gitignore` excludes `cp500/*.rom`, so ROMs you put in `cp500/` at the repository root are never committed.
+
+When the app finds both files, it starts in the CP-500 at 100% scale. If a file is missing or the character generator is not exactly 2,048 bytes, the app starts in CP/M and the CP-500 option stays disabled. Use `--cpm` to start in CP/M anyway. Click the logo in the top-left corner of the bezel to switch machines or mount disks.
 
 ### Using the CP-500
 
