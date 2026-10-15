@@ -10,6 +10,7 @@
 - [plans/phase5-terminal.md](plans/phase5-terminal.md) - ADM-3A terminal with CRT effects
 - [plans/cp500-emulation.md](plans/cp500-emulation.md) - CP-500 status by phase and open follow-ups
 - [plans/cp500-compatibility-remediation.md](plans/cp500-compatibility-remediation.md) - Model III compatibility steps (done) and follow-ups
+- [plans/cp500-expansions.md](plans/cp500-expansions.md) - Planned RS-232, virtual hard disk, network card and headless runner
 
 ## Core
 - [core/cpu.md](core/cpu.md) - 8080 CPU implementation details
