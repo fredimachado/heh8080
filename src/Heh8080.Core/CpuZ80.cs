@@ -446,7 +446,7 @@ public sealed class CpuZ80 : ICpu
         return InterruptMode switch
         {
             0 => EnterInterrupt((ushort)(dataBus & 0x38), 13),
-            2 => EnterInterrupt(ReadWord((ushort)((I << 8) | (dataBus & 0xFE))), 19),
+            2 => EnterInterrupt(ReadWord((ushort)((I << 8) | dataBus)), 19),
             _ => EnterInterrupt(0x0038, 13)
         };
     }

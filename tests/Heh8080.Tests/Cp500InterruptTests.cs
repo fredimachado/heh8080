@@ -179,6 +179,26 @@ public sealed class Cp500MachineInterruptTests
     }
 
     [Fact]
+    public void Mode2TimerInterruptVectorsThroughTheTableEntryAtTheFloatingBusByteFFh()
+    {
+        // LD A,80h ; LD I,A ; IM 2 ; EI ; JR $
+        byte[] main = { 0x3E, 0x80, 0xED, 0x47, 0xED, 0x5E, 0xFB, 0x18, 0xFE };
+        var machine = new Cp500Machine(Cp500MachineProfile.Original, Rom(main));
+        // 80FEh:80FFh reads 5000h, 80FFh:8100h reads 6050h.
+        machine.Memory.Write(0x80FE, 0x00);
+        machine.Memory.Write(0x80FF, 0x50);
+        machine.Memory.Write(0x8100, 0x60);
+        machine.Memory.Write(0x5000, 0x18);
+        machine.Memory.Write(0x5001, 0xFE);
+        for (int index = 0; index < TimerHandler.Length; index++)
+            machine.Memory.Write((ushort)(0x6050 + index), TimerHandler[index]);
+
+        Run(machine, Period(machine) * 5 / 2);
+
+        Assert.Equal(2, machine.Memory.Read(TickCounter));
+    }
+
+    [Fact]
     public void TimerTickRaisedDuringDiIsServicedOnceInterruptsAreEnabled()
     {
         byte[] main =

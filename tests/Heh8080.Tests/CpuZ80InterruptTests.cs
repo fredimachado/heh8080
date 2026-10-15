@@ -92,7 +92,7 @@ public sealed class CpuZ80InterruptTests
 
         _cpu.InterruptMode = 2;
         _cpu.I = 0x10;
-        Load(0x10FE, 0x34, 0x12);
+        Load(0x10FF, 0x34, 0x12);
         _cpu.IFF1 = _cpu.IFF2 = true;
 
         int mode2 = _cpu.Step();
