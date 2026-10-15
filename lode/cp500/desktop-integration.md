@@ -1,8 +1,8 @@
 # CP-500 Desktop Integration
 
-The net10.0 Avalonia desktop app starts in the unchanged CP/M machine and
-offers CP-500 as a second machine in `ConfigDialog`; `--cp500` starts directly
-in it. At startup, `App` looks for the user-owned `cp500.rom` (16 KiB
+The net10.0 Avalonia desktop app starts in the CP-500 at 100% scale when both
+ROMs are found, otherwise in the unchanged CP/M machine at 60%; `--cpm` forces
+CP/M. `ConfigDialog` switches between the two machines. At startup, `App` looks for the user-owned `cp500.rom` (16 KiB
 system ROM) and `cp500-chargen.rom` (2 KiB character generator) in
 `<app dir>/cp500/`, `<current dir>/cp500/` and `%LOCALAPPDATA%\heh8080\`. The
 files are read into memory and passed to `MainViewModel`; they are never an

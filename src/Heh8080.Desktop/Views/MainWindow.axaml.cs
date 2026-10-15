@@ -32,6 +32,12 @@ public partial class MainWindow : Window
         GotFocus += (s, e) => MainView.FocusTerminal();
     }
 
+    public double TerminalScale
+    {
+        get => MainView.TerminalScale;
+        set => MainView.TerminalScale = value;
+    }
+
     protected override void OnKeyDown(KeyEventArgs e)
     {
         // Forward all key events to terminal

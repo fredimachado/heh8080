@@ -151,7 +151,7 @@ Borderless window with minimal chrome - just the FJM-3A terminal:
 
 ## Display Scaling
 
-- **Default scale**: 60% (set in `MainWindow.axaml.cs`)
+- **Default scale**: 100% when `App` starts the CP-500 (both ROMs found), otherwise 60% (set in `MainWindow.axaml.cs`)
 - **Available scales**: 100%, 80%, 60%, 40%
 - **Window behavior**: Not user-resizable (`CanResize="False"`), auto-sizes to fit terminal on scale change
 - **User control**: Click scale buttons to change; window adjusts automatically
@@ -161,4 +161,8 @@ Borderless window with minimal chrome - just the FJM-3A terminal:
 // MainWindow.axaml.cs
 MainView.TerminalScale = 0.6;  // Initial 60% scale
 MainView.TerminalScaleChanged += OnTerminalScaleChanged;  // Resize window on change
+
+// App.axaml.cs
+if (startCp500)
+    mainWindow.TerminalScale = 1.0;
 ```

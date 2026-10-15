@@ -30,10 +30,15 @@ public partial class App : Application
             _viewModel = new MainViewModel(
                 diskProvider, LoadCp500File("cp500.rom"), LoadCp500File("cp500-chargen.rom"));
 
-            desktop.MainWindow = new MainWindow
+            bool startCp500 = _viewModel.IsCp500Available &&
+                !desktop.Args.Contains("--cpm", StringComparer.OrdinalIgnoreCase);
+            var mainWindow = new MainWindow
             {
                 DataContext = _viewModel
             };
+            if (startCp500)
+                mainWindow.TerminalScale = 1.0;
+            desktop.MainWindow = mainWindow;
 
             // Clean up on shutdown
             desktop.ShutdownRequested += (s, e) =>
@@ -44,7 +49,7 @@ public partial class App : Application
 
             MountBundledDisk(diskProvider);
 
-            if (desktop.Args.Contains("--cp500", StringComparer.OrdinalIgnoreCase))
+            if (startCp500)
             {
                 Dispatcher.UIThread.Post(async () =>
                 {
