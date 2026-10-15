@@ -16,9 +16,6 @@ public enum ModelIIIDiskImageKind
     /// <summary>Flat 18-sector-per-track 256-byte-sector media.</summary>
     Raw,
 
-    /// <summary>JV1 sector stream.</summary>
-    Jv1,
-
     /// <summary>JV3 metadata header plus sector payload stream.</summary>
     Jv3,
 
@@ -47,6 +44,9 @@ public static class ModelIIIDiskGeometry
 
     /// <summary>Maximum number of sides supported by the optional 360 KiB image format.</summary>
     public const int MaximumSides = 2;
+
+    /// <summary>Number of drives the controller can address.</summary>
+    public const int MaxDrives = 4;
 
     /// <summary>Number of one-based sectors per track.</summary>
     public const int SectorsPerTrack = 18;
@@ -87,16 +87,24 @@ public static class ModelIIIDiskGeometry
         (((track * sideCount + side) * SectorsPerTrack) + (sector - 1)) * BytesPerSector;
 }
 
-/// <summary>Native sector record used by WD1791 commands and image codecs.</summary>
+/// <summary>
+/// Native sector record used by WD1791 commands and image codecs.
+/// <see cref="Track"/> and <see cref="Side"/> locate the sector physically;
+/// <see cref="IdTrack"/> is the track number recorded in its ID field when that differs.
+/// </summary>
 public sealed record ModelIIIDiskSector(
     int Track,
     int Side,
     int Id,
     byte[] Data,
-    ModelIIIDiskDensity Density = ModelIIIDiskDensity.SingleDensity,
+    ModelIIIDiskDensity Density = ModelIIIDiskDensity.DoubleDensity,
     bool DeletedData = false,
-    bool CrcValid = true)
+    bool CrcValid = true,
+    int? IdTrack = null)
 {
+    /// <summary>Track number recorded in the sector ID field.</summary>
+    public int RecordedTrack => IdTrack ?? Track;
+
     /// <summary>WD17xx size code for the payload length.</summary>
     public byte SizeCode => Data.Length switch
     {
@@ -104,35 +112,37 @@ public sealed record ModelIIIDiskSector(
         256 => 1,
         512 => 2,
         1024 => 3,
-        _ => 1
+        _ => throw new InvalidOperationException("Model III sector payloads must be 128, 256, 512, or 1024 bytes.")
     };
 }
-
-/// <summary>Metadata returned by READ ADDRESS without copying the sector payload.</summary>
-public readonly record struct ModelIIIDiskSectorHeader(
-    int Track,
-    int Side,
-    int Id,
-    byte SizeCode,
-    ModelIIIDiskDensity Density,
-    bool DeletedData,
-    bool CrcValid);
 
 /// <summary>Decoded host-independent Model III disk image.</summary>
 public sealed class ModelIIIDiskImage
 {
-    private readonly List<ModelIIIDiskSector> _sectors;
+    private readonly Dictionary<(int Track, int Side), List<ModelIIIDiskSector>> _tracks = [];
 
-    /// <summary>Creates a native image from sector records.</summary>
+    /// <summary>Creates a native image from sector records, keeping their order within each track.</summary>
     public ModelIIIDiskImage(
         ModelIIIDiskFormat format,
         IEnumerable<ModelIIIDiskSector> sectors,
-        ModelIIIDiskImageKind sourceKind = ModelIIIDiskImageKind.Raw)
+        ModelIIIDiskImageKind sourceKind = ModelIIIDiskImageKind.Raw,
+        bool writeProtected = false)
     {
         Format = format;
         SourceKind = sourceKind;
-        _sectors = sectors.Select(CloneSector).ToList();
-        Validate();
+        WriteProtected = writeProtected;
+
+        foreach (var sector in sectors)
+        {
+            if (FindProblem(sector) is { } problem)
+                throw new InvalidDataException(problem);
+
+            var track = GetOrAddTrack(sector.Track, sector.Side);
+            if (track.Any(existing => existing.Id == sector.Id))
+                throw new InvalidDataException($"Duplicate Model III sector T{sector.Track} S{sector.Side} ID{sector.Id}.");
+
+            track.Add(CloneSector(sector));
+        }
     }
 
     /// <summary>Physical format inferred or declared for this image.</summary>
@@ -141,28 +151,53 @@ public sealed class ModelIIIDiskImage
     /// <summary>Original host container format.</summary>
     public ModelIIIDiskImageKind SourceKind { get; }
 
-    /// <summary>Native sectors in host-independent form.</summary>
-    public IReadOnlyList<ModelIIIDiskSector> Sectors => _sectors;
+    /// <summary>Whether the source container asked for the disk to be treated as write protected.</summary>
+    public bool WriteProtected { get; }
+
+    /// <summary>Native sectors in host-independent form, ordered by track, side, then rotational position.</summary>
+    public IReadOnlyList<ModelIIIDiskSector> Sectors =>
+        _tracks.OrderBy(entry => entry.Key.Track).ThenBy(entry => entry.Key.Side).SelectMany(entry => entry.Value).ToList();
+
+    /// <summary>Returns the sectors of a physical track in rotational order. The list is live and must not be modified.</summary>
+    public IReadOnlyList<ModelIIIDiskSector> GetTrack(int track, int side) =>
+        _tracks.TryGetValue((track, side), out var sectors) ? sectors : [];
 
     /// <summary>Finds a sector by physical address.</summary>
     public ModelIIIDiskSector? FindSector(int track, int side, int id) =>
-        _sectors.FirstOrDefault(sector => sector.Track == track && sector.Side == side && sector.Id == id);
+        GetTrack(track, side).FirstOrDefault(sector => sector.Id == id);
 
-    /// <summary>Returns the first sector header for a track/side.</summary>
-    public bool TryGetFirstHeader(int track, int side, out ModelIIIDiskSectorHeader header)
+    /// <summary>Overwrites the payload of an existing sector, clearing any CRC error.</summary>
+    public bool WriteSector(int track, int side, int id, ReadOnlySpan<byte> data, bool deletedData)
     {
-        var sector = _sectors.FirstOrDefault(value => value.Track == track && value.Side == side);
-        if (sector is null)
-        {
-            header = default;
+        if (!_tracks.TryGetValue((track, side), out var sectors))
             return false;
-        }
 
-        header = ToHeader(sector);
+        int index = sectors.FindIndex(sector => sector.Id == id);
+        if (index < 0 || sectors[index].Data.Length != data.Length)
+            return false;
+
+        sectors[index] = sectors[index] with { Data = data.ToArray(), DeletedData = deletedData, CrcValid = true };
         return true;
     }
 
-    /// <summary>Creates a flat erased image.</summary>
+    /// <summary>Replaces every sector of a physical track, for example after a WRITE TRACK format.</summary>
+    public bool TryReplaceTrack(int track, int side, IReadOnlyList<ModelIIIDiskSector> sectors)
+    {
+        var ids = new HashSet<int>();
+        bool valid = sectors.All(sector =>
+            sector.Track == track && sector.Side == side && FindProblem(sector) is null && ids.Add(sector.Id));
+        if (!valid || side >= ModelIIIDiskGeometry.GetSideCount(Format))
+            return false;
+
+        if (sectors.Count == 0)
+            _tracks.Remove((track, side));
+        else
+            _tracks[(track, side)] = sectors.Select(CloneSector).ToList();
+
+        return true;
+    }
+
+    /// <summary>Creates a flat erased double-density image.</summary>
     public static ModelIIIDiskImage CreateBlank(ModelIIIDiskFormat format)
     {
         var sectors = new List<ModelIIIDiskSector>();
@@ -205,7 +240,7 @@ public sealed class ModelIIIDiskImage
         int sides = ModelIIIDiskGeometry.GetSideCount(Format);
         byte[] raw = new byte[ModelIIIDiskGeometry.GetDiskSizeBytes(Format)];
         Array.Fill(raw, (byte)0xE5);
-        foreach (var sector in _sectors)
+        foreach (var sector in Sectors)
         {
             if (!ModelIIIDiskGeometry.IsValidSector(sector.Track, sector.Side, sector.Id, sides))
                 continue;
@@ -218,26 +253,30 @@ public sealed class ModelIIIDiskImage
         return raw;
     }
 
-    private void Validate()
+    private List<ModelIIIDiskSector> GetOrAddTrack(int track, int side)
     {
-        int sides = ModelIIIDiskGeometry.GetSideCount(Format);
-        var seen = new HashSet<(int Track, int Side, int Id)>();
-        foreach (var sector in _sectors)
+        if (!_tracks.TryGetValue((track, side), out var sectors))
+            _tracks[(track, side)] = sectors = [];
+
+        return sectors;
+    }
+
+    private string? FindProblem(ModelIIIDiskSector sector)
+    {
+        if (sector.Track is < 0 or >= ModelIIIDiskGeometry.Tracks ||
+            sector.Side < 0 || sector.Side >= ModelIIIDiskGeometry.GetSideCount(Format) ||
+            sector.Id is < 0 or > byte.MaxValue)
         {
-            if (!ModelIIIDiskGeometry.IsValidSector(sector.Track, sector.Side, sector.Id, sides))
-                throw new InvalidDataException($"Invalid Model III sector T{sector.Track} S{sector.Side} ID{sector.Id}.");
-            if (sector.Data.Length is not (128 or 256 or 512 or 1024))
-                throw new InvalidDataException("Model III sector payloads must be 128, 256, 512, or 1024 bytes.");
-            if (!seen.Add((sector.Track, sector.Side, sector.Id)))
-                throw new InvalidDataException($"Duplicate Model III sector T{sector.Track} S{sector.Side} ID{sector.Id}.");
+            return $"Invalid Model III sector T{sector.Track} S{sector.Side} ID{sector.Id}.";
         }
+
+        return sector.Data.Length is 128 or 256 or 512 or 1024
+            ? null
+            : "Model III sector payloads must be 128, 256, 512, or 1024 bytes.";
     }
 
     private static ModelIIIDiskSector CloneSector(ModelIIIDiskSector sector) =>
         sector with { Data = sector.Data.ToArray() };
-
-    internal static ModelIIIDiskSectorHeader ToHeader(ModelIIIDiskSector sector) =>
-        new(sector.Track, sector.Side, sector.Id, sector.SizeCode, sector.Density, sector.DeletedData, sector.CrcValid);
 }
 
 /// <summary>
@@ -252,62 +291,17 @@ public interface IModelIIIDiskImageProvider
     /// <summary>Whether a mounted drive accepts writes.</summary>
     bool IsReadOnly(int drive);
 
-    /// <summary>Reads one 256-byte physical sector.</summary>
-    bool ReadSector(int drive, int track, int side, int sector, Span<byte> buffer);
+    /// <summary>
+    /// Returns the sectors of a physical track in rotational order, or an empty list when
+    /// the drive is empty or the track does not exist. Callers must not modify the result.
+    /// </summary>
+    IReadOnlyList<ModelIIIDiskSector> GetTrack(int drive, int track, int side);
 
-    /// <summary>Writes one 256-byte physical sector.</summary>
-    bool WriteSector(int drive, int track, int side, int sector, ReadOnlySpan<byte> buffer);
+    /// <summary>Overwrites the payload of an existing sector, optionally marking it with a deleted data mark.</summary>
+    bool WriteSector(int drive, int track, int side, int sector, ReadOnlySpan<byte> data, bool deletedData = false);
 
-    /// <summary>Returns native metadata for a sector when the provider has it.</summary>
-    bool TryGetSectorHeader(int drive, int track, int side, int sector, out ModelIIIDiskSectorHeader header)
-    {
-        header = default;
-        return false;
-    }
-
-    /// <summary>Reads a serialized view of one track for READ TRACK.</summary>
-    bool ReadTrack(int drive, int track, int side, Span<byte> buffer)
-    {
-        if (buffer.Length < ModelIIIDiskGeometry.SectorsPerTrack * ModelIIIDiskGeometry.BytesPerSector)
-            return false;
-
-        for (int sector = 1; sector <= ModelIIIDiskGeometry.SectorsPerTrack; sector++)
-        {
-            if (!ReadSector(
-                    drive,
-                    track,
-                    side,
-                    sector,
-                    buffer.Slice((sector - 1) * ModelIIIDiskGeometry.BytesPerSector, ModelIIIDiskGeometry.BytesPerSector)))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>Writes a serialized track from WRITE TRACK.</summary>
-    bool WriteTrack(int drive, int track, int side, ReadOnlySpan<byte> buffer)
-    {
-        if (buffer.Length < ModelIIIDiskGeometry.SectorsPerTrack * ModelIIIDiskGeometry.BytesPerSector)
-            return false;
-
-        for (int sector = 1; sector <= ModelIIIDiskGeometry.SectorsPerTrack; sector++)
-        {
-            if (!WriteSector(
-                    drive,
-                    track,
-                    side,
-                    sector,
-                    buffer.Slice((sector - 1) * ModelIIIDiskGeometry.BytesPerSector, ModelIIIDiskGeometry.BytesPerSector)))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    /// <summary>Replaces every sector of a track with the sectors a format operation produced.</summary>
+    bool ReplaceTrack(int drive, int track, int side, IReadOnlyList<ModelIIIDiskSector> sectors);
 }
 
 /// <summary>
@@ -315,10 +309,7 @@ public interface IModelIIIDiskImageProvider
 /// </summary>
 public sealed class MemoryModelIIIDiskImageProvider : IModelIIIDiskImageProvider
 {
-    /// <summary>Maximum conventional drive count supported by this provider.</summary>
-    public const int MaxDrives = 4;
-
-    private readonly MountedImage?[] _images = new MountedImage?[MaxDrives];
+    private readonly MountedImage?[] _images = new MountedImage?[ModelIIIDiskGeometry.MaxDrives];
 
     /// <summary>Mounts a defensive 180 KiB single-sided image, padding short media with <c>E5h</c>.</summary>
     public void Mount(int drive, ReadOnlySpan<byte> image, bool readOnly = false)
@@ -331,12 +322,16 @@ public sealed class MemoryModelIIIDiskImageProvider : IModelIIIDiskImageProvider
     public void Mount(int drive, ReadOnlySpan<byte> image, ModelIIIDiskFormat format, bool readOnly = false)
         => Mount(drive, ModelIIIDiskImage.FromRaw(image, format), readOnly);
 
-    /// <summary>Mounts a native decoded image.</summary>
+    /// <summary>Parses and mounts an image stored in a host container format.</summary>
+    public void Mount(int drive, ReadOnlySpan<byte> image, ModelIIIDiskImageKind kind, bool readOnly = false)
+        => Mount(drive, ModelIIIDiskCodec.Parse(image, kind), readOnly);
+
+    /// <summary>Mounts a native decoded image. A write-protected source container always mounts read-only.</summary>
     public void Mount(int drive, ModelIIIDiskImage image, bool readOnly = false)
     {
         ValidateDrive(drive);
         ArgumentNullException.ThrowIfNull(image);
-        _images[drive] = new MountedImage(image, readOnly);
+        _images[drive] = new MountedImage(image, readOnly || image.WriteProtected);
     }
 
     /// <summary>Mounts a blank 180 KiB single-sided erased image.</summary>
@@ -353,11 +348,11 @@ public sealed class MemoryModelIIIDiskImageProvider : IModelIIIDiskImageProvider
         _images[drive] = null;
     }
 
-    /// <summary>Returns a raw snapshot of the mounted image.</summary>
-    public byte[] GetRawImage(int drive)
+    /// <summary>Returns a snapshot of the mounted image in the container format it was mounted from.</summary>
+    public byte[] GetImageBytes(int drive)
     {
-        ValidateDrive(drive);
-        return _images[drive]?.Image.ToRawBytes() ?? throw new InvalidOperationException("No image is mounted.");
+        var image = GetMounted(drive).Image;
+        return ModelIIIDiskCodec.Serialize(image, image.SourceKind);
     }
 
     public bool IsMounted(int drive) => IsValidDrive(drive) && _images[drive] is not null;
@@ -365,91 +360,40 @@ public sealed class MemoryModelIIIDiskImageProvider : IModelIIIDiskImageProvider
     public bool IsReadOnly(int drive) =>
         IsValidDrive(drive) && _images[drive] is { ReadOnly: true };
 
-    public bool ReadSector(int drive, int track, int side, int sector, Span<byte> buffer)
+    public IReadOnlyList<ModelIIIDiskSector> GetTrack(int drive, int track, int side) =>
+        IsValidDrive(drive) && _images[drive] is { } mounted ? mounted.Image.GetTrack(track, side) : [];
+
+    public bool WriteSector(int drive, int track, int side, int sector, ReadOnlySpan<byte> data, bool deletedData = false) =>
+        TryGetWritable(drive, out var mounted) &&
+        mounted.RecordChange(mounted.Image.WriteSector(track, side, sector, data, deletedData));
+
+    public bool ReplaceTrack(int drive, int track, int side, IReadOnlyList<ModelIIIDiskSector> sectors) =>
+        TryGetWritable(drive, out var mounted) &&
+        mounted.RecordChange(mounted.Image.TryReplaceTrack(track, side, sectors));
+
+    /// <summary>Whether the mounted image changed since it was mounted or last marked saved.</summary>
+    public bool IsModified(int drive) => IsValidDrive(drive) && _images[drive] is { Modified: true };
+
+    /// <summary>Records that the mounted image was persisted, so <see cref="IsModified"/> reports false until the next write.</summary>
+    public void MarkSaved(int drive) => GetMounted(drive).Modified = false;
+
+    private bool TryGetWritable(int drive, out MountedImage mounted)
     {
-        if (!TryGetSector(drive, track, side, sector, out var native) ||
-            buffer.Length < ModelIIIDiskGeometry.BytesPerSector)
-        {
+        mounted = null!;
+        if (!IsValidDrive(drive) || _images[drive] is not { ReadOnly: false } writable)
             return false;
-        }
 
-        native.Data.AsSpan(0, Math.Min(native.Data.Length, ModelIIIDiskGeometry.BytesPerSector))
-            .CopyTo(buffer[..ModelIIIDiskGeometry.BytesPerSector]);
-        return native.CrcValid;
-    }
-
-    public bool WriteSector(int drive, int track, int side, int sector, ReadOnlySpan<byte> buffer)
-    {
-        if (IsReadOnly(drive) ||
-            !TryGetSector(drive, track, side, sector, out var native) ||
-            buffer.Length < ModelIIIDiskGeometry.BytesPerSector)
-        {
-            return false;
-        }
-
-        buffer[..ModelIIIDiskGeometry.BytesPerSector].CopyTo(native.Data);
+        mounted = writable;
         return true;
     }
 
-    public bool TryGetSectorHeader(int drive, int track, int side, int sector, out ModelIIIDiskSectorHeader header)
+    private MountedImage GetMounted(int drive)
     {
-        if (!TryGetSector(drive, track, side, sector, out var native))
-        {
-            header = default;
-            return false;
-        }
-
-        header = ModelIIIDiskImage.ToHeader(native);
-        return true;
+        ValidateDrive(drive);
+        return _images[drive] ?? throw new InvalidOperationException("No image is mounted.");
     }
 
-    public bool ReadTrack(int drive, int track, int side, Span<byte> buffer)
-    {
-        if (!IsValidDrive(drive) || _images[drive] is not { } mounted)
-            return false;
-
-        int offset = 0;
-        foreach (var sector in mounted.Image.Sectors.Where(sector => sector.Track == track && sector.Side == side).OrderBy(sector => sector.Id))
-        {
-            if (offset + sector.Data.Length > buffer.Length)
-                return false;
-
-            sector.Data.CopyTo(buffer[offset..]);
-            offset += sector.Data.Length;
-        }
-
-        return offset > 0;
-    }
-
-    public bool WriteTrack(int drive, int track, int side, ReadOnlySpan<byte> buffer)
-    {
-        if (IsReadOnly(drive) || !IsValidDrive(drive) || _images[drive] is not { } mounted)
-            return false;
-
-        int offset = 0;
-        foreach (var sector in mounted.Image.Sectors.Where(sector => sector.Track == track && sector.Side == side).OrderBy(sector => sector.Id))
-        {
-            if (offset + sector.Data.Length > buffer.Length)
-                return false;
-
-            buffer.Slice(offset, sector.Data.Length).CopyTo(sector.Data);
-            offset += sector.Data.Length;
-        }
-
-        return offset > 0;
-    }
-
-    private bool TryGetSector(int drive, int track, int side, int sector, out ModelIIIDiskSector native)
-    {
-        native = null!;
-        if (!IsValidDrive(drive) || _images[drive] is not { } mounted)
-            return false;
-
-        native = mounted.Image.FindSector(track, side, sector)!;
-        return native is not null;
-    }
-
-    private static bool IsValidDrive(int drive) => drive is >= 0 and < MaxDrives;
+    private static bool IsValidDrive(int drive) => drive is >= 0 and < ModelIIIDiskGeometry.MaxDrives;
 
     private static void ValidateDrive(int drive)
     {
@@ -457,5 +401,18 @@ public sealed class MemoryModelIIIDiskImageProvider : IModelIIIDiskImageProvider
             throw new ArgumentOutOfRangeException(nameof(drive));
     }
 
-    private sealed record MountedImage(ModelIIIDiskImage Image, bool ReadOnly);
+    private sealed class MountedImage(ModelIIIDiskImage image, bool readOnly)
+    {
+        public ModelIIIDiskImage Image { get; } = image;
+
+        public bool ReadOnly { get; } = readOnly;
+
+        public bool Modified { get; set; }
+
+        public bool RecordChange(bool changed)
+        {
+            Modified |= changed;
+            return changed;
+        }
+    }
 }

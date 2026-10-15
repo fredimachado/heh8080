@@ -425,6 +425,8 @@ test-results/
 # Mac bundle stuff
 *.dmg
 *.app
+# Git matches case-insensitively on Windows, so *.app also hits src/Heh8080.App
+!**/Heh8080.App/
 
 # content below from: https://github.com/github/gitignore/blob/main/Global/macOS.gitignore
 # General

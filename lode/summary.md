@@ -71,6 +71,7 @@ All phases complete (1-8) plus Z80 support. Emulator runs LOLOS on desktop (net1
   - Emulator class orchestrates CPU on background thread (max speed)
   - MainViewModel wires devices, handles auto-boot from bundled LOLOS disk
   - FJM-3A logo button opens ConfigDialog for disk mount/unmount/reset
+  - CP-500 (TRS-80 Model III clone) is a second machine in the same app: [cp500/summary.md](cp500/summary.md)
   - 10ms timer interrupt via System.Threading.Timer
   - Bundled lolos.dsk as embedded resource
   - Idle detection in ConsolePortHandler reduces CPU usage when waiting for input

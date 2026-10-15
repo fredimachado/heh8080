@@ -1,10 +1,11 @@
+using System.Numerics;
 using Heh8080.Core;
 
 namespace Heh8080.Devices;
 
 /// <summary>
 /// Model III write-only disk-control latch mirrored across F4h-F7h.
-/// It selects a drive/head and exposes WD1791 handshaking without coupling devices to a CPU implementation.
+/// It selects a drive/head/density and holds the CPU in WAIT until WD1791 DRQ or INTRQ without coupling devices to a CPU implementation.
 /// Reads of F4h-F7h belong to the CP-500 ROM A11 flip-flop.
 /// </summary>
 public sealed class Cp500DiskControlDevice : IIoDevice
@@ -15,8 +16,12 @@ public sealed class Cp500DiskControlDevice : IIoDevice
     /// <summary>Last mirrored disk-control port.</summary>
     public const byte LastControlPort = 0xF7;
 
+    private const byte DriveSelectBits = 0x0F;
+    private const byte SideBit = 0x10;
+    private const byte WaitBit = 0x40;
+    private const byte MfmBit = 0x80;
+
     private readonly Wd1791Controller _controller;
-    private bool _waitActive;
 
     /// <summary>Creates a disk-control latch attached to a WD1791 controller.</summary>
     public Cp500DiskControlDevice(Wd1791Controller controller)
@@ -30,34 +35,20 @@ public sealed class Cp500DiskControlDevice : IIoDevice
     public byte ControlLatch { get; private set; }
 
     /// <summary>Active drive-select lines represented by latch bits 0-3.</summary>
-    public byte DriveSelectMask => (byte)(ControlLatch & 0x0F);
+    public byte DriveSelectMask => (byte)(ControlLatch & DriveSelectBits);
 
     /// <summary>Selected physical side from latch bit 4.</summary>
-    public int SelectedSide => (ControlLatch >> 4) & 0x01;
+    public int SelectedSide => (ControlLatch & SideBit) != 0 ? 1 : 0;
 
     /// <summary>Whether latch bit 6 requests CPU WAIT until DRQ or INTRQ.</summary>
-    public bool WaitRequested => (ControlLatch & 0x40) != 0;
+    public bool WaitRequested => (ControlLatch & WaitBit) != 0;
+
+    /// <summary>Recording density selected by latch bit 7: MFM when set, FM when clear.</summary>
+    public ModelIIIDiskDensity SelectedDensity =>
+        (ControlLatch & MfmBit) != 0 ? ModelIIIDiskDensity.DoubleDensity : ModelIIIDiskDensity.SingleDensity;
 
     /// <summary>Whether the host should presently hold a CPU in WAIT.</summary>
-    public bool WaitActive => _waitActive;
-
-    /// <summary>Current WD1791 DRQ line.</summary>
-    public bool DataRequest => _controller.DataRequest;
-
-    /// <summary>Current WD1791 INTRQ line.</summary>
-    public bool InterruptRequest => _controller.InterruptRequest;
-
-    /// <summary>Raised after the latch selects a new drive, side, or WAIT request.</summary>
-    public event Action<byte>? ControlLatchChanged;
-
-    /// <summary>Raised whenever the WD1791 DRQ line changes.</summary>
-    public event Action<bool>? DataRequestChanged;
-
-    /// <summary>Raised whenever the WD1791 INTRQ line changes.</summary>
-    public event Action<bool>? InterruptRequestChanged;
-
-    /// <summary>Raised whenever the host-facing WAIT state changes.</summary>
-    public event Action<bool>? WaitActiveChanged;
+    public bool WaitActive { get; private set; }
 
     /// <summary>Registers the write side of F4h-F7h.</summary>
     public void Register(IoBus bus)
@@ -69,14 +60,9 @@ public sealed class Cp500DiskControlDevice : IIoDevice
     /// <summary>Resets the latch and disconnects all disk drives without changing mounted media.</summary>
     public void Reset()
     {
-        bool changed = ControlLatch != 0;
         ControlLatch = 0;
-        _controller.DeselectDrive();
-        _controller.SelectSide(0);
-        SetWaitActive(false);
-
-        if (changed)
-            ControlLatchChanged?.Invoke(ControlLatch);
+        ApplyLatch();
+        WaitActive = false;
     }
 
     /// <summary>The latch is write-only.</summary>
@@ -89,44 +75,32 @@ public sealed class Cp500DiskControlDevice : IIoDevice
             return;
 
         ControlLatch = value;
+        ApplyLatch();
+        WaitActive = ShouldAssertWait();
+    }
+
+    private void ApplyLatch()
+    {
         byte drives = DriveSelectMask;
         if (drives == 0)
-        {
             _controller.DeselectDrive();
-        }
         else
-        {
-            _controller.SelectDrive(GetLowestSelectedDrive(drives));
-        }
+            _controller.SelectDrive(BitOperations.TrailingZeroCount(drives));
 
         _controller.SelectSide(SelectedSide);
-        SetWaitActive(ShouldAssertWait());
-        ControlLatchChanged?.Invoke(ControlLatch);
+        _controller.SelectDensity(SelectedDensity);
     }
 
     private void OnDataRequestChanged(bool value)
     {
         if (value)
-            SetWaitActive(false);
-
-        DataRequestChanged?.Invoke(value);
+            WaitActive = false;
     }
 
     private void OnInterruptRequestChanged(bool value)
     {
         if (value)
-            SetWaitActive(false);
-
-        InterruptRequestChanged?.Invoke(value);
-    }
-
-    private void SetWaitActive(bool value)
-    {
-        if (_waitActive == value)
-            return;
-
-        _waitActive = value;
-        WaitActiveChanged?.Invoke(value);
+            WaitActive = false;
     }
 
     private bool ShouldAssertWait() =>
@@ -137,15 +111,4 @@ public sealed class Cp500DiskControlDevice : IIoDevice
         !_controller.InterruptRequest;
 
     private static bool IsControlPort(byte port) => port is >= ControlPort and <= LastControlPort;
-
-    private static int GetLowestSelectedDrive(byte driveMask)
-    {
-        for (int drive = 0; drive < MemoryModelIIIDiskImageProvider.MaxDrives; drive++)
-        {
-            if ((driveMask & (1 << drive)) != 0)
-                return drive;
-        }
-
-        throw new ArgumentOutOfRangeException(nameof(driveMask));
-    }
 }

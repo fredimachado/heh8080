@@ -54,6 +54,14 @@ public sealed class CpuZ80 : ICpu
     /// </summary>
     public bool WaitLine { get; set; }
 
+    // Interrupt requests are latched here and sampled by Step at instruction boundaries.
+    // They can be written from other threads. 0 means no request, otherwise Asserted | data bus byte.
+    private const int Asserted = 0x100;
+    private int _intLine;
+    private int _intPulse;
+    private int _nmiEdge;
+    private bool _eiShadow;
+
     // Memory and I/O
     private readonly IMemory _memory;
     private readonly IIoBus _ioBus;
@@ -116,6 +124,10 @@ public sealed class CpuZ80 : ICpu
         InterruptMode = 0;
         Halted = false;
         WaitLine = false;
+        _eiShadow = false;
+        Volatile.Write(ref _intLine, 0);
+        Volatile.Write(ref _intPulse, 0);
+        Volatile.Write(ref _nmiEdge, 0);
     }
 
     #region Register Pair Accessors
@@ -225,9 +237,11 @@ public sealed class CpuZ80 : ICpu
 
     private byte FetchByte()
     {
-        R = (byte)((R & 0x80) | ((R + 1) & 0x7F)); // Increment lower 7 bits
+        IncrementR();
         return _memory.Read(PC++);
     }
+
+    private void IncrementR() => R = (byte)((R & 0x80) | ((R + 1) & 0x7F)); // Increment lower 7 bits
 
     private ushort FetchWord()
     {
@@ -256,6 +270,12 @@ public sealed class CpuZ80 : ICpu
     public int Step()
     {
         if (WaitLine) return 4;
+
+        bool eiShadow = _eiShadow;
+        _eiShadow = false;
+        int interruptCycles = AcceptInterrupt(eiShadow);
+        if (interruptCycles != 0) return interruptCycles;
+
         if (Halted) return 4;
 
         byte opcode = FetchByte();
@@ -379,45 +399,66 @@ public sealed class CpuZ80 : ICpu
         }
     }
 
-    public void Interrupt(byte vector)
-    {
-        if (!IFF1) return;
-        IFF1 = IFF2 = false;
-        Halted = false;
-
-        switch (InterruptMode)
-        {
-            case 0:
-                // Execute instruction on data bus (usually RST)
-                Push(PC);
-                PC = (ushort)(vector * 8);
-                break;
-            case 1:
-                // RST 38h
-                Push(PC);
-                PC = 0x0038;
-                break;
-            case 2:
-                // Vector table: address = (I << 8) | vector
-                Push(PC);
-                ushort tableAddr = (ushort)((I << 8) | (vector & 0xFE));
-                PC = ReadWord(tableAddr);
-                break;
-        }
-    }
+    /// <summary>
+    /// Drives the maskable interrupt request line. The level is sampled at the start of every
+    /// instruction and accepted when IFF1 is set; the request stays until the line is lowered.
+    /// <paramref name="dataBus"/> is the byte the interrupting device places on the bus
+    /// (the RST opcode in mode 0, the vector in mode 2).
+    /// </summary>
+    public void SetInterruptLine(bool asserted, byte dataBus = 0xFF) =>
+        Volatile.Write(ref _intLine, asserted ? Asserted | dataBus : 0);
 
     /// <summary>
-    /// Presents an edge-triggered Z80 non-maskable interrupt. NMI ignores IFF1,
-    /// pushes the current PC, clears IFF1, preserves the previous maskable
-    /// enable state in IFF2, and vectors to 0066h.
+    /// Latches a one-shot maskable request for RST <paramref name="vector"/> (0-7). It is consumed
+    /// by the first instruction boundary at which interrupts are accepted. Safe to call from any thread.
     /// </summary>
-    public void NonMaskableInterrupt()
+    public void Interrupt(byte vector) =>
+        Volatile.Write(ref _intPulse, Asserted | 0xC7 | ((vector & 7) << 3));
+
+    /// <summary>
+    /// Latches a non-maskable interrupt edge. The CPU takes it at the next instruction boundary,
+    /// ignoring IFF1, and vectors to 0066h. Safe to call from I/O handlers and other threads.
+    /// </summary>
+    public void NonMaskableInterrupt() => Volatile.Write(ref _nmiEdge, 1);
+
+    private int AcceptInterrupt(bool eiShadow)
     {
-        IFF2 = IFF1;
+        if (Volatile.Read(ref _nmiEdge) != 0)
+        {
+            Volatile.Write(ref _nmiEdge, 0);
+            IFF2 = IFF1;
+            return EnterInterrupt(0x0066, 11);
+        }
+
+        if (!IFF1 || eiShadow)
+            return 0;
+
+        int request = Volatile.Read(ref _intPulse);
+        if (request != 0)
+            Volatile.Write(ref _intPulse, 0);
+        else
+            request = Volatile.Read(ref _intLine);
+        if (request == 0)
+            return 0;
+
+        IFF2 = false;
+        byte dataBus = (byte)request;
+        return InterruptMode switch
+        {
+            0 => EnterInterrupt((ushort)(dataBus & 0x38), 13),
+            2 => EnterInterrupt(ReadWord((ushort)((I << 8) | (dataBus & 0xFE))), 19),
+            _ => EnterInterrupt(0x0038, 13)
+        };
+    }
+
+    private int EnterInterrupt(ushort target, int cycles)
+    {
         IFF1 = false;
         Halted = false;
+        IncrementR();
         Push(PC);
-        PC = 0x0066;
+        PC = target;
+        return cycles;
     }
 
     #endregion
@@ -1103,7 +1144,7 @@ public sealed class CpuZ80 : ICpu
 
         // DI/EI
         _mainOps[0xF3] = () => { IFF1 = IFF2 = false; return 4; };
-        _mainOps[0xFB] = () => { IFF1 = IFF2 = true; return 4; };
+        _mainOps[0xFB] = () => { IFF1 = IFF2 = true; _eiShadow = true; return 4; };
 
         // LD SP,HL
         _mainOps[0xF9] = () => { SP = HL; return 6; };

@@ -147,22 +147,24 @@ owner and one write owner, and there are no alias ranges.
 
 | Ports | IN | OUT | Owner (IN / OUT) |
 |-------|----|-----|------------------|
-| E0-E3 | `~(irqMask & irqPending)`, active low. Sources stay latched | IRQ mask (bit 2 = 30 Hz timer; cassette/RS-232 bits accepted, never asserted) | `Cp500InterruptDevice` |
-| E4-E7 | `~(nmiMask & nmiPending)`, then clears NMI pending | NMI mask (bit 7 FDC INTRQ, bit 6 motor timeout) | `Cp500InterruptDevice` |
-| E8-EB | RS-232 status/data stub | RS-232 control/data stub | `Cp500Rs232Device` |
+| E0-E3 | `~(irqMask & irqPending)`, active low. Sources stay latched | IRQ mask (bit 2 = 30 Hz timer; other bits accepted, never asserted) | `Cp500InterruptDevice` |
+| E4-E7 | `~(nmiMask & nmiStatus)`; bit 7 mirrors the live FDC INTRQ line | NMI mask (bit 7 FDC INTRQ) | `Cp500InterruptDevice` |
 | EC-EF | Acknowledges the timer IRQ (clears only bit 2 pending), returns 00h | Video/misc control latch | `Cp500InterruptDevice` / `Cp500VideoDevice` |
 | F0-F3 | WD1791 status, track, sector, data | WD1791 command, track, sector, data | `Wd1791Controller` |
 | F4-F7 | Toggles the ROM A11 flip-flop, returns 00h | Drive select (bits 0-3), side (4), WAIT (6), MFM (7) | `Cp500SystemRom` / `Cp500DiskControlDevice` |
-| F8 | Printer status | Printer data | `Cp500PrinterPort` |
+| F8-FB | Printer status (select, no fault; BUSY when the printer is busy) | Printer data | `Cp500PrinterPort` |
 | FF | 00h, no side effects (no cassette attached) | Ignored | `Cp500CassettePort` |
+
+E8-EB (RS-232) is not modelled and reads as open bus. The F4-F7 bit 7 write
+selects MFM (set) or FM (clear) density for the WD1791.
 
 ```csharp
 machine.IoBus.Out(0xE0, 0x04); // enable the 30 Hz timer IRQ
-machine.TickInterrupt();
+machine.Interrupts.AdvanceCycles(machine.Interrupts.TimerPeriodCycles);
 _ = machine.IoBus.In(0xE0);    // FBh: timer pending (active low)
 _ = machine.IoBus.In(0xEC);    // acknowledges the timer; IN E0 now reads FFh
 machine.IoBus.Out(0xF4, 0x41); // drive 0 + WAIT request
-_ = machine.IoBus.In(0xF4);    // toggles Rom.A11Forced
+_ = machine.IoBus.In(0xF4);    // toggles the ROM A11 flip-flop
 ```
 
 Contracts: F4-F7 reads never change disk selection, F4-F7 writes never change

@@ -145,7 +145,7 @@ Borderless window with minimal chrome - just the FJM-3A terminal:
 - **Scale buttons**: Top-right bezel corner, four buttons (100%, 80%, 60%, 40%)
 - **Exit button**: Bottom-right bezel corner, green square (no legend), closes app
 - **Click logo**: Opens ConfigDialog modal
-- **ConfigDialog**: Disk mount/unmount for A:-D:, Reset button
+- **ConfigDialog**: Disk mount/unmount for the active machine (A:-D: for CP/M, drives 0-3 for CP-500, see [../cp500/desktop-integration.md](../cp500/desktop-integration.md)), machine and CPU selection, Reset button
 - No Start/Stop - emulator runs continuously from launch
 
 ## Display Scaling

@@ -1,5 +1,5 @@
 using System;
-using System.Collections.Generic;
+using System.Threading;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Input;
@@ -11,7 +11,6 @@ using Avalonia.Skia;
 using Avalonia.Threading;
 using Heh8080.Devices;
 using Heh8080.Terminal;
-using Heh8080.UI.Diagnostics;
 using SkiaSharp;
 
 namespace Heh8080.UI.Controls;
@@ -24,12 +23,9 @@ public class RetroTerminalControl : Control
 {
     private Adm3aTerminal? _terminal;
     private Cp500VideoDevice? _cp500Video;
-    private Cp500KeyboardDevice? _cp500Keyboard;
-    private int _cp500PulseGeneration;
-    private (int Row, int Column, bool Shift)? _cp500ActivePulse;
-    private int _cp500PulseScanCount;
-    private readonly Queue<(int Row, int Column, bool Shift)> _cp500PulseQueue = new();
-    private readonly HashSet<Key> _cp500HeldSpecialKeys = new();
+    private Cp500KeyboardDevice? _cp500KeyboardDevice;
+    private Cp500HostKeyboard? _cp500Keyboard;
+    private int _cp500RedrawPending;
     private double _charWidth;
     private double _charHeight;
     private bool _hasMeasured;
@@ -96,8 +92,6 @@ public class RetroTerminalControl : Control
     private static readonly Color ScreenBezelColor = Color.FromRgb(0x50, 0x50, 0x48);  // Inner bezel base
     private static readonly Color ScreenBezelShadow = Color.FromRgb(0x30, 0x30, 0x28);  // Inner bezel shadow
     private static readonly Color ScreenBezelHighlight = Color.FromRgb(0x68, 0x68, 0x60);  // Inner bezel highlight
-    private static readonly TimeSpan Cp500KeyPulseDuration = TimeSpan.FromMilliseconds(50);
-
     private SKTypeface? _typeface;
 
     public static readonly StyledProperty<double> ScaleProperty =
@@ -170,11 +164,17 @@ public class RetroTerminalControl : Control
         set
         {
             if (_cp500Video != null)
+            {
                 _cp500Video.CharacterChanged -= OnCp500CharacterChanged;
+                _cp500Video.ControlChanged -= OnCp500ControlChanged;
+            }
 
             _cp500Video = value;
             if (_cp500Video != null)
+            {
                 _cp500Video.CharacterChanged += OnCp500CharacterChanged;
+                _cp500Video.ControlChanged += OnCp500ControlChanged;
+            }
 
             MeasureCharacterSize();
             InvalidateVisual();
@@ -183,15 +183,12 @@ public class RetroTerminalControl : Control
 
     public Cp500KeyboardDevice? Cp500Keyboard
     {
-        get => _cp500Keyboard;
+        get => _cp500KeyboardDevice;
         set
         {
-            if (_cp500Keyboard != null)
-                _cp500Keyboard.Matrix.ReadObserved -= OnCp500MatrixRead;
-
-            _cp500Keyboard = value;
-            if (_cp500Keyboard != null)
-                _cp500Keyboard.Matrix.ReadObserved += OnCp500MatrixRead;
+            _cp500Keyboard?.ReleaseAll();
+            _cp500KeyboardDevice = value;
+            _cp500Keyboard = value == null ? null : new Cp500HostKeyboard(value);
         }
     }
 
@@ -244,14 +241,42 @@ public class RetroTerminalControl : Control
         Dispatcher.UIThread.Post(InvalidateVisual, DispatcherPriority.Render);
     }
 
-    private void OnCp500CharacterChanged(int column, int row, byte character) =>
-        Dispatcher.UIThread.Post(InvalidateVisual, DispatcherPriority.Render);
+    private void OnCp500CharacterChanged(int column, int row, byte character) => RequestCp500Redraw();
+
+    private void OnCp500ControlChanged(byte control) => RequestCp500Redraw();
+
+    /// <summary>Called from the emulation thread for every VRAM write, so at most one redraw is ever pending.</summary>
+    private void RequestCp500Redraw()
+    {
+        if (Interlocked.Exchange(ref _cp500RedrawPending, 1) == 0)
+            Dispatcher.UIThread.Post(RedrawCp500, DispatcherPriority.Render);
+    }
+
+    private void RedrawCp500()
+    {
+        Volatile.Write(ref _cp500RedrawPending, 0);
+        InvalidateVisual();
+    }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
     {
         base.OnAttachedToVisualTree(e);
         MeasureCharacterSize();
+        if (TopLevel.GetTopLevel(this) is WindowBase window)
+            window.Deactivated += OnWindowDeactivated;
     }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        if (e.Root is WindowBase window)
+            window.Deactivated -= OnWindowDeactivated;
+
+        _cp500Keyboard?.ReleaseAll();
+        base.OnDetachedFromVisualTree(e);
+    }
+
+    /// <summary>Key-up events never arrive while another window is active, so nothing may stay held.</summary>
+    private void OnWindowDeactivated(object? sender, EventArgs e) => _cp500Keyboard?.ReleaseAll();
 
     private void MeasureCharacterSize()
     {
@@ -544,21 +569,6 @@ public class RetroTerminalControl : Control
     protected override void OnTextInput(TextInputEventArgs e)
     {
         base.OnTextInput(e);
-        if (_cp500Keyboard != null && !string.IsNullOrEmpty(e.Text))
-        {
-            foreach (char character in e.Text)
-            {
-                if (TryMapCp500Character(character, out int row, out int column, out bool shift))
-                {
-                    Cp500DiagnosticTrace.Write(
-                        $"text-input char=U+{(int)character:X4} row={row} column={column} shift={shift}");
-                    PulseCp500Key(row, column, shift);
-                    e.Handled = true;
-                }
-            }
-            return;
-        }
-
         if (_terminal == null || string.IsNullOrEmpty(e.Text))
             return;
 
@@ -578,13 +588,9 @@ public class RetroTerminalControl : Control
         base.OnKeyDown(e);
         if (_cp500Keyboard != null)
         {
-            if (TryMapCp500SpecialKey(e.Key, out int row, out int column))
+            if (TryMapCp500Key(e, out var stroke))
             {
-                if (_cp500HeldSpecialKeys.Add(e.Key))
-                {
-                    Cp500DiagnosticTrace.Write($"special-key-down key={e.Key} row={row} column={column}");
-                    PulseCp500Key(row, column, shift: false);
-                }
+                _cp500Keyboard.KeyDown((int)e.Key, stroke);
                 e.Handled = true;
             }
             return;
@@ -623,132 +629,50 @@ public class RetroTerminalControl : Control
     protected override void OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);
-        if (_cp500Keyboard != null &&
-            TryMapCp500SpecialKey(e.Key, out int row, out int column))
-        {
-            Cp500DiagnosticTrace.Write($"special-key-up key={e.Key} row={row} column={column}");
-            _cp500HeldSpecialKeys.Remove(e.Key);
+        if (_cp500Keyboard != null && _cp500Keyboard.KeyUp((int)e.Key))
             e.Handled = true;
-        }
     }
 
     protected override void OnLostFocus(RoutedEventArgs e)
     {
-        Cp500DiagnosticTrace.Write("terminal-focus-lost");
-        _cp500PulseGeneration++;
-        _cp500ActivePulse = null;
-        _cp500PulseScanCount = 0;
-        _cp500PulseQueue.Clear();
-        _cp500HeldSpecialKeys.Clear();
         _cp500Keyboard?.ReleaseAll();
         base.OnLostFocus(e);
     }
 
-    private void PulseCp500Key(int row, int column, bool shift)
+    private static bool TryMapCp500Key(KeyEventArgs e, out Cp500KeyStroke stroke)
     {
-        _cp500PulseQueue.Enqueue((row, column, shift));
-        if (_cp500ActivePulse == null)
-            StartNextCp500Pulse();
-    }
-
-    private void StartNextCp500Pulse()
-    {
-        if (_cp500Keyboard == null || _cp500PulseQueue.Count == 0)
+        if (TryTranslateCp500HostKey(e.Key, out var hostKey))
         {
-            _cp500ActivePulse = null;
-            return;
+            stroke = Cp500KeyMap.Map(hostKey);
+            return true;
         }
 
-        Cp500KeyboardDevice keyboard = _cp500Keyboard;
-        int generation = _cp500PulseGeneration;
-        var pulse = _cp500PulseQueue.Dequeue();
-        _cp500ActivePulse = pulse;
-        _cp500PulseScanCount = 0;
-        Cp500DiagnosticTrace.Write(
-            $"pulse-start row={pulse.Row} column={pulse.Column} shift={pulse.Shift} queued={_cp500PulseQueue.Count}");
-        if (pulse.Shift)
-            keyboard.SetKeyState(7, 0, true);
-        keyboard.SetKeyState(pulse.Row, pulse.Column, true);
-        DispatcherTimer.RunOnce(() =>
+        // Letters come from the physical key so Caps Lock and Ctrl never change which switch closes.
+        char character = e.Key is >= Key.A and <= Key.Z
+            ? (char)('A' + (e.Key - Key.A))
+            : e.KeySymbol is { Length: 1 } symbol ? symbol[0] : '\0';
+        return Cp500KeyMap.TryMapCharacter(character, out stroke);
+    }
+
+    private static bool TryTranslateCp500HostKey(Key key, out Cp500HostKey hostKey)
+    {
+        Cp500HostKey? mapped = key switch
         {
-            EndCp500Pulse(generation, pulse);
-        }, Cp500KeyPulseDuration);
-    }
-
-    private void OnCp500MatrixRead(byte rowMask, byte value)
-    {
-        var pulse = _cp500ActivePulse;
-        if (pulse == null)
-            return;
-
-        byte selectedRow = (byte)(1 << pulse.Value.Row);
-        byte pressedColumn = (byte)(1 << pulse.Value.Column);
-        if ((rowMask & selectedRow) == 0 || (value & pressedColumn) == 0)
-            return;
-
-        Interlocked.Increment(ref _cp500PulseScanCount);
-    }
-
-    private void EndCp500Pulse(int generation, (int Row, int Column, bool Shift) pulse)
-    {
-        if (generation != _cp500PulseGeneration || _cp500ActivePulse == null || _cp500Keyboard == null)
-            return;
-
-        _cp500Keyboard.SetKeyState(pulse.Row, pulse.Column, false);
-        if (pulse.Shift)
-            _cp500Keyboard.SetKeyState(7, 0, false);
-        Cp500DiagnosticTrace.Write(
-            $"pulse-end row={pulse.Row} column={pulse.Column} shift={pulse.Shift} scans={_cp500PulseScanCount}");
-        _cp500ActivePulse = null;
-        StartNextCp500Pulse();
-    }
-
-    private static bool TryMapCp500SpecialKey(Key key, out int row, out int column)
-    {
-        (row, column) = key switch
-        {
-            Key.Return or Key.Enter => (6, 0),
-            Key.Back => (6, 1),
-            Key.Escape => (6, 2),
-            Key.Up => (6, 3),
-            Key.Down => (6, 4),
-            Key.Left => (6, 5),
-            Key.Right => (6, 6),
-            _ => (-1, -1)
+            Key.LeftShift or Key.RightShift => Cp500HostKey.Shift,
+            Key.Return or Key.Enter => Cp500HostKey.Enter,
+            Key.Space => Cp500HostKey.Space,
+            Key.Back => Cp500HostKey.Backspace,
+            Key.Escape => Cp500HostKey.Escape,
+            Key.Home => Cp500HostKey.Home,
+            Key.Up => Cp500HostKey.Up,
+            Key.Down => Cp500HostKey.Down,
+            Key.Left => Cp500HostKey.Left,
+            Key.Right => Cp500HostKey.Right,
+            _ => null
         };
-        return row >= 0;
+        hostKey = mapped.GetValueOrDefault();
+        return mapped.HasValue;
     }
-
-    private static bool TryMapCp500Character(char character, out int row, out int column, out bool shift)
-    {
-        shift = false;
-        char c = char.ToUpperInvariant(character);
-
-        if (c >= 'A' && c <= 'G') { row = 0; column = c - 'A' + 1; return true; }
-        if (c >= 'H' && c <= 'O') { row = 1; column = c - 'H'; return true; }
-        if (c >= 'P' && c <= 'W') { row = 2; column = c - 'P'; return true; }
-        if (c >= 'X' && c <= 'Z') { row = 3; column = c - 'X'; return true; }
-        if (c >= '0' && c <= '7') { row = 4; column = c - '0'; return true; }
-        if (c is '8' or '9') { row = 5; column = c - '8'; return true; }
-
-        (row, column, shift) = c switch
-        {
-            '@' => (0, 0, false),
-            '[' => (3, 3, false), '\\' => (3, 4, false), ']' => (3, 5, false),
-            '^' => (3, 6, false), '_' => (3, 7, false),
-            ':' => (5, 2, false), ';' => (5, 3, false), ',' => (5, 4, false),
-            '-' => (5, 5, false), '.' => (5, 6, false), '/' => (5, 7, false),
-            ' ' => (6, 7, false),
-            '!' => (4, 1, true), '"' => (4, 2, true), '#' => (4, 3, true),
-            '$' => (4, 4, true), '%' => (4, 5, true), '&' => (4, 6, true),
-            '\'' => (4, 7, true), '(' => (5, 0, true), ')' => (5, 1, true),
-            '*' => (5, 2, true), '+' => (5, 3, true), '<' => (5, 4, true),
-            '=' => (5, 5, true), '>' => (5, 6, true), '?' => (5, 7, true),
-            _ => (-1, -1, false)
-        };
-        return row >= 0;
-    }
-
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
@@ -811,6 +735,8 @@ internal class TerminalDrawOperation : ICustomDrawOperation
     private readonly float _charWidth;
     private readonly float _charHeight;
     private readonly float _cornerRadius;
+
+    private const int HalfwidthKatakanaStart = 0xFF61;
 
     // CRT shader with barrel distortion, scanlines, bloom, vignette, edge shadow
     private const string CrtShaderSource = @"
@@ -1079,66 +1005,107 @@ half4 main(float2 fragCoord) {
 
     private void RenderCp500Content(SKCanvas canvas, int width, int height)
     {
-        using var font = new SKFont(_typeface, _fontSize);
-        var metrics = font.Metrics;
-        float baseline = -metrics.Ascent;
-        float contentWidth = _charWidth * Cp500VideoDevice.Columns;
-        float contentHeight = _charHeight * Cp500VideoDevice.Rows;
-        float offsetX = (width - contentWidth) / 2;
-        float offsetY = (height - contentHeight) / 2;
+        var video = _cp500Video!;
+        int visibleColumns = video.VisibleColumns;
+        float cellWidth = _charWidth * Cp500VideoDevice.Columns / visibleColumns;
+        float offsetX = (width - _charWidth * Cp500VideoDevice.Columns) / 2;
+        float offsetY = (height - _charHeight * Cp500VideoDevice.Rows) / 2;
 
-        using var glowPaint = new SKPaint(font)
-        {
-            Color = new SKColor(0x33, 0xFF, 0x33, 0x60),
-            IsAntialias = true
-        };
-        using var textPaint = new SKPaint(font)
-        {
-            Color = new SKColor(0x33, 0xFF, 0x33),
-            IsAntialias = true
-        };
-        using var graphicsPaint = new SKPaint
-        {
-            Color = new SKColor(0x33, 0xFF, 0x33),
-            Style = SKPaintStyle.Fill
-        };
-
+        var cells = new Cp500RenderedCell[visibleColumns * Cp500VideoDevice.Rows];
         for (int y = 0; y < Cp500VideoDevice.Rows; y++)
         {
-            for (int x = 0; x < Cp500VideoDevice.Columns; x++)
+            for (int x = 0; x < visibleColumns; x++)
+                cells[y * visibleColumns + x] = video.GetRenderedCell(x, y);
+        }
+
+        DrawCp500Blocks(canvas, cells, visibleColumns, cellWidth, offsetX, offsetY);
+        DrawCp500Text(canvas, cells, visibleColumns, cellWidth, offsetX, offsetY);
+    }
+
+    /// <summary>
+    /// Draws 2x3 block graphics on pixel-snapped edges shared by neighbouring blocks and cells,
+    /// so they tile without gaps or overlap at every scale.
+    /// </summary>
+    private void DrawCp500Blocks(
+        SKCanvas canvas, Cp500RenderedCell[] cells, int visibleColumns, float cellWidth, float offsetX, float offsetY)
+    {
+        using var paint = new SKPaint { Color = new SKColor(0x33, 0xFF, 0x33), Style = SKPaintStyle.Fill };
+        for (int row = 0; row < Cp500VideoDevice.Rows; row++)
+        {
+            for (int column = 0; column < visibleColumns; column++)
             {
-                byte value = _cp500Video!.ReadCharacter(x, y);
-                float px = offsetX + x * _charWidth;
-                float py = offsetY + y * _charHeight;
-                if ((value & 0x80) != 0)
+                byte blocks = cells[row * visibleColumns + column].Blocks;
+                for (int bit = 0; bit < 6; bit++)
                 {
-                    float blockWidth = _charWidth / 2;
-                    float blockHeight = _charHeight / 3;
-                    for (int bit = 0; bit < 6; bit++)
-                    {
-                        if ((value & (1 << bit)) == 0) continue;
-                        int bx = bit & 1;
-                        int by = bit >> 1;
-                        canvas.DrawRect(
-                            px + bx * blockWidth, py + by * blockHeight,
-                            blockWidth + 0.5f, blockHeight + 0.5f, graphicsPaint);
-                    }
-                    continue;
+                    if ((blocks & (1 << bit)) == 0)
+                        continue;
+
+                    float left = SnapToPixel(offsetX + (column + (bit & 1) * 0.5f) * cellWidth);
+                    float right = SnapToPixel(offsetX + (column + ((bit & 1) + 1) * 0.5f) * cellWidth);
+                    float top = SnapToPixel(offsetY + (row + (bit >> 1) / 3f) * _charHeight);
+                    float bottom = SnapToPixel(offsetY + (row + ((bit >> 1) + 1) / 3f) * _charHeight);
+                    canvas.DrawRect(new SKRect(left, top, right, bottom), paint);
                 }
-
-                if (value == 0)
-                    continue;
-
-                char character = value < 0x20 ? (char)(value + 0x40) : (char)value;
-                if (character == ' ') continue;
-                string text = character.ToString();
-                canvas.DrawText(text, px - 1, py + baseline - 1, glowPaint);
-                canvas.DrawText(text, px + 1, py + baseline + 1, glowPaint);
-                canvas.DrawText(text, px, py + baseline, textPaint);
             }
         }
     }
 
+    private void DrawCp500Text(
+        SKCanvas canvas, Cp500RenderedCell[] cells, int visibleColumns, float cellWidth, float offsetX, float offsetY)
+    {
+        using var font = new SKFont(_typeface, _fontSize);
+        bool hasKatakana = Array.Exists(cells, cell => cell.Glyph >= HalfwidthKatakanaStart);
+        using var katakanaTypeface = hasKatakana ? SKFontManager.Default.MatchCharacter(HalfwidthKatakanaStart) : null;
+        using var katakanaFont = new SKFont(katakanaTypeface ?? _typeface, _fontSize);
+        float baseline = -font.Metrics.Ascent;
+
+        using var glowPaint = new SKPaint { Color = new SKColor(0x33, 0xFF, 0x33, 0x60), IsAntialias = true };
+        using var textPaint = new SKPaint { Color = new SKColor(0x33, 0xFF, 0x33), IsAntialias = true };
+
+        // Same glow as the CP/M renderer: dim copies at the four diagonal offsets, then the glyph itself.
+        (float X, float Y, SKPaint Paint)[] passes =
+        {
+            (-1.5f, -1.5f, glowPaint), (1.5f, -1.5f, glowPaint),
+            (-1.5f, 1.5f, glowPaint), (1.5f, 1.5f, glowPaint),
+            (0, 0, textPaint)
+        };
+        foreach (var (dx, dy, paint) in passes)
+        {
+            for (int row = 0; row < Cp500VideoDevice.Rows; row++)
+            {
+                for (int column = 0; column < visibleColumns; column++)
+                {
+                    var cell = cells[row * visibleColumns + column];
+                    if (cell.Graphics || cell.Glyph == ' ')
+                        continue;
+
+                    var cellFont = cell.Glyph >= HalfwidthKatakanaStart ? katakanaFont : font;
+                    DrawGlyph(
+                        canvas, cell.Glyph.ToString(),
+                        offsetX + column * cellWidth + dx, offsetY + row * _charHeight + baseline + dy,
+                        cell.DoubleWidth, cellFont, paint);
+                }
+            }
+        }
+    }
+
+    private static void DrawGlyph(
+        SKCanvas canvas, string text, float x, float baselineY, bool doubleWidth, SKFont font, SKPaint paint)
+    {
+        if (!doubleWidth)
+        {
+            canvas.DrawText(text, x, baselineY, font, paint);
+            return;
+        }
+
+        canvas.Save();
+        canvas.Translate(x, baselineY);
+        canvas.Scale(2, 1);
+        canvas.DrawText(text, 0, 0, font, paint);
+        canvas.Restore();
+    }
+
+    private static float SnapToPixel(float value) => MathF.Round(value);
     private void RenderTerminalDirect(SKCanvas canvas)
     {
         // Fallback: render directly without shader

@@ -15,9 +15,14 @@
 - **WD1791** - Western Digital floppy controller used by the CP-500/Model III path
 - **DRQ** - WD1791 Data Request line; a byte can be transferred while active
 - **INTRQ** - WD1791 Interrupt Request line; command completion/error signal routed through interrupt fabric
-- **NMI** - Z80 non-maskable interrupt; CP-500 reset/FDC fabric vectors to 0066h when enabled
+- **NMI** - Z80 non-maskable interrupt; the CP-500 raises it, vectoring to 0066h, when FDC INTRQ is unmasked
 - **WAIT** - Z80 wait input; stalls instruction fetch/retire while hardware cycles continue
-- **JV1/JV3/DMK/raw** - TRS-80/Model III disk image container formats supported by CP-500 codecs
+- **JV3/DMK/raw** - TRS-80/Model III disk image container formats supported by CP-500 codecs (a JV1 file is the same bytes as a raw 180 KiB image)
+- **TR00** - WD1791 status bit 2 after a restore/seek: head at track 0; an installed drive reports it with or without media
+- **Index pulse** - Once-per-revolution drive signal (WD1791 status bit 1 on Type I commands); only a mounted disk produces it
+- **Drive bay** - `Cp500DriveBay`, the host side of the CP-500 drives: names, mounting and write-back policy
+- **Write-back** - Saving a modified mounted disk to its source file in its source format
+- **A11 flip-flop** - CP-500 latch toggled by `IN F4h-F7h` that forces EPROM address line A11 high, showing the monitor hidden behind keyboard and video
 - **MMU** - Memory Management Unit, handles bank switching via ports 20-23
 - **NativeAOT** - Ahead-of-Time compilation to native code
 - **WASM** - WebAssembly, binary instruction format for web browsers

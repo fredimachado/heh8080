@@ -22,17 +22,38 @@ public interface IMemoryRegion
 }
 
 /// <summary>
+/// A region whose <see cref="IMemoryRegion.Handles"/> answers can change at runtime,
+/// for example a ROM that can be switched out. It must raise <see cref="MappingChanged"/>
+/// after every such change so <see cref="MappedMemory"/> can refresh its page table.
+/// A region only ever handles addresses inside its start and end addresses.
+/// </summary>
+public interface IRemappableMemoryRegion : IMemoryRegion
+{
+    /// <summary>Raised after <see cref="IMemoryRegion.Handles"/> may answer differently.</summary>
+    event Action? MappingChanged;
+}
+
+/// <summary>
 /// Composes memory regions into a 64 KiB address space.
 /// Regions are consulted in constructor order, so earlier regions overlay later ones.
+/// Addresses nobody handles read as FFh and ignore writes.
 /// </summary>
+/// <remarks>
+/// A 256-entry table of 256-byte pages caches the owning region of every page that a single
+/// region owns entirely. Pages shared by several regions are resolved per address.
+/// </remarks>
 public sealed class MappedMemory : IMemory
 {
-    private readonly IMemoryRegion[] _regions;
+    private const int PageShift = 8;
+    private const int PageSize = 1 << PageShift;
+    private const int PageCount = 65536 >> PageShift;
 
-    /// <summary>
-    /// Creates a mapped address space. At least one region, normally an
-    /// <see cref="UnmappedMemoryRegion"/>, must cover every unhandled address.
-    /// </summary>
+    private static readonly IMemoryRegion OpenBus = new OpenBusRegion();
+
+    private readonly IMemoryRegion[] _regions;
+    private readonly IMemoryRegion?[] _pages = new IMemoryRegion?[PageCount];
+
+    /// <summary>Creates a mapped address space from regions in descending mapping priority.</summary>
     public MappedMemory(params IMemoryRegion[] regions)
     {
         ArgumentNullException.ThrowIfNull(regions);
@@ -42,31 +63,77 @@ public sealed class MappedMemory : IMemory
         _regions = regions.ToArray();
         if (_regions.Any(region => region is null))
             throw new ArgumentException("Memory regions cannot contain null.", nameof(regions));
-    }
 
-    /// <summary>Regions in descending mapping priority.</summary>
-    public IReadOnlyList<IMemoryRegion> Regions => _regions;
+        foreach (var region in _regions)
+        {
+            if (region is IRemappableMemoryRegion remappable)
+                remappable.MappingChanged += () => ResolvePages(region.StartAddress, region.EndAddress);
+        }
+
+        ResolvePages(0, 0xFFFF);
+    }
 
     public byte Read(ushort address)
     {
-        foreach (var region in _regions)
-        {
-            if (region.Handles(address))
-                return region.Read(address);
-        }
-
-        return 0xFF;
+        var owner = _pages[address >> PageShift];
+        return owner is null ? ScanRead(address) : owner.Read(address);
     }
 
     public void Write(ushort address, byte value)
     {
+        var owner = _pages[address >> PageShift];
+        if (owner is null)
+            ScanWrite(address, value);
+        else
+            owner.Write(address, value);
+    }
+
+    private byte ScanRead(ushort address) => FindHandler(address).Read(address);
+
+    private void ScanWrite(ushort address, byte value) => FindHandler(address).Write(address, value);
+
+    private IMemoryRegion FindHandler(ushort address)
+    {
         foreach (var region in _regions)
         {
             if (region.Handles(address))
-            {
-                region.Write(address, value);
-                return;
-            }
+                return region;
+        }
+
+        return OpenBus;
+    }
+
+    private void ResolvePages(ushort first, ushort last)
+    {
+        for (int page = first >> PageShift; page <= last >> PageShift; page++)
+            _pages[page] = ResolvePage(page);
+    }
+
+    private IMemoryRegion? ResolvePage(int page)
+    {
+        int start = page << PageShift;
+        var owner = FindHandler((ushort)start);
+        for (int address = start + 1; address < start + PageSize; address++)
+        {
+            if (!ReferenceEquals(FindHandler((ushort)address), owner))
+                return null;
+        }
+
+        return owner;
+    }
+
+    private sealed class OpenBusRegion : IMemoryRegion
+    {
+        public ushort StartAddress => 0;
+
+        public ushort EndAddress => 0xFFFF;
+
+        public bool Handles(ushort address) => true;
+
+        public byte Read(ushort address) => 0xFF;
+
+        public void Write(ushort address, byte value)
+        {
         }
     }
 }
@@ -74,7 +141,7 @@ public sealed class MappedMemory : IMemory
 /// <summary>
 /// Common base for contiguous non-wrapping memory regions.
 /// </summary>
-public abstract class MemoryRegion : IMemoryRegion
+public abstract class MemoryRegion : IRemappableMemoryRegion
 {
     /// <summary>Inclusive start of the address range.</summary>
     public ushort StartAddress { get; }
@@ -96,43 +163,18 @@ public abstract class MemoryRegion : IMemoryRegion
         EndAddress = (ushort)(startAddress + length - 1);
     }
 
+    public event Action? MappingChanged;
+
     public virtual bool Handles(ushort address) => address >= StartAddress && address <= EndAddress;
+
+    /// <summary>Call after every change that makes <see cref="Handles"/> answer differently.</summary>
+    protected void RaiseMappingChanged() => MappingChanged?.Invoke();
 
     /// <summary>Gets the zero-based offset for an address already handled by this region.</summary>
     protected int GetOffset(ushort address) => address - StartAddress;
 
     public abstract byte Read(ushort address);
     public abstract void Write(ushort address, byte value);
-}
-
-/// <summary>
-/// Read-only memory that can be temporarily disabled to reveal a lower-priority region.
-/// </summary>
-public sealed class RomMemoryRegion : MemoryRegion
-{
-    private readonly byte[] _data;
-
-    /// <summary>Whether this ROM currently responds to reads and writes.</summary>
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>Creates a ROM region from a defensive copy of <paramref name="data"/>.</summary>
-    public RomMemoryRegion(ushort startAddress, ReadOnlySpan<byte> data)
-        : base(startAddress, data.Length)
-    {
-        _data = data.ToArray();
-    }
-
-    public override bool Handles(ushort address) => Enabled && base.Handles(address);
-
-    public override byte Read(ushort address) => _data[GetOffset(address)];
-
-    /// <summary>ROM writes are deliberately ignored.</summary>
-    public override void Write(ushort address, byte value)
-    {
-    }
-
-    /// <summary>Copies the ROM contents without exposing mutable backing storage.</summary>
-    public byte[] ToArray() => _data.ToArray();
 }
 
 /// <summary>
@@ -201,9 +243,6 @@ public sealed class KeyboardMatrix
     private const int ColumnCount = 8;
     private readonly byte[] _rows = new byte[RowCount];
 
-    /// <summary>Raised when the CPU reads a row-selection mask and its active-high value.</summary>
-    public event Action<byte, byte>? ReadObserved;
-
     /// <summary>Marks one key as pressed or released.</summary>
     public void SetKeyState(int row, int column, bool pressed)
     {
@@ -230,7 +269,6 @@ public sealed class KeyboardMatrix
                 result |= _rows[row];
         }
 
-        ReadObserved?.Invoke(rowMask, result);
         return result;
     }
 
@@ -269,27 +307,6 @@ public sealed class KeyboardMatrixRegion : MemoryRegion
     public override byte Read(ushort address) => _matrix.Read((byte)address);
 
     /// <summary>Keyboard writes are ignored.</summary>
-    public override void Write(ushort address, byte value)
-    {
-    }
-}
-
-/// <summary>
-/// Open-bus memory range. Reads return a predictable value and writes are discarded.
-/// </summary>
-public sealed class UnmappedMemoryRegion : MemoryRegion
-{
-    private readonly byte _readValue;
-
-    /// <summary>Creates an unmapped range with an open-bus read value of <c>FFh</c> by default.</summary>
-    public UnmappedMemoryRegion(ushort startAddress, int length, byte readValue = 0xFF)
-        : base(startAddress, length)
-    {
-        _readValue = readValue;
-    }
-
-    public override byte Read(ushort address) => _readValue;
-
     public override void Write(ushort address, byte value)
     {
     }

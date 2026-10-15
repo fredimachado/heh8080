@@ -33,13 +33,13 @@ public partial class MainView : UserControl
         DataContextChanged += (s, e) =>
         {
             if (_viewModel != null)
-                _viewModel.MachineProfileChanged -= ApplyMachineProfile;
+                _viewModel.ActiveMachineChanged -= ApplyActiveMachine;
 
             if (DataContext is MainViewModel vm)
             {
                 _viewModel = vm;
-                _viewModel.MachineProfileChanged += ApplyMachineProfile;
-                ApplyMachineProfile();
+                _viewModel.ActiveMachineChanged += ApplyActiveMachine;
+                ApplyActiveMachine();
             }
         };
 
@@ -53,7 +53,7 @@ public partial class MainView : UserControl
         Terminal.ExitClicked += () => ExitRequested?.Invoke();
     }
 
-    private void ApplyMachineProfile()
+    private void ApplyActiveMachine()
     {
         if (_viewModel == null)
             return;

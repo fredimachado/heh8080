@@ -1,112 +1,95 @@
 # CP-500 Model III Compatibility Remediation
 
-This plan closes the high-priority gaps found by comparing the CP-500 machine
+This plan closed the high-priority gaps found by comparing the CP-500 machine
 with MAME and SDLTRS Model III implementations. It preserves the CP/M machine,
-keeps ROMs and disks user supplied, and explicitly excludes cassette transport,
-audio, images, motor control, and cassette interrupts.
+keeps ROMs and disks user supplied, and excludes cassette transport, audio,
+motor control, and cassette interrupts.
+
+Status: steps 1-5 are **done**. Open follow-ups are listed at the end.
 
 ```mermaid
 flowchart LR
-    A[ROM switching] --> B[IRQ/NMI signal fabric]
-    B --> C[Timed WD17xx + CPU WAIT]
-    C --> D[Disk codecs and mount UI]
-    A --> E[Video control modes]
+    A[ROM switching - done] --> B[IRQ/NMI signal fabric - done]
+    B --> C[Timed WD17xx + CPU WAIT - done]
+    C --> D[Disk codecs and mount UI - done]
+    A --> E[Video control modes - done]
 ```
 
 ## Sequence and contracts
 
-### 1. CP-500 F4h-F7h read-side ROM switching
+### 1. CP-500 F4h-F7h read-side ROM switching - done
 
-- Separate the ROM/monitor bank control from the disk-control write latch.
-  `IN F4h-F7h` must perform its hardware bank effect instead of returning only
-  the last drive-control value.
-- Model the A11 flip-flop explicitly. Keyboard and video regions must retain
-  priority over both ROM views.
+- `Cp500SystemRom` owns an A11 flip-flop toggled by every `IN F4h-F7h`; while
+  set, a ROM read at `a` returns EPROM byte `a | 0800h`. Keyboard and video keep
+  priority. `OUT F4h-F7h` is the separate disk-control latch.
 - No E0h-E7h aliases: those ports are the IRQ/NMI fabric, and F0h-F7h is the
   only disk path (see [../devices/io-ports.md](../devices/io-ports.md)).
-- Test reset, every F4h-F7h read, drive/side writes, and execution from both
-  ROM views.
+- Tests cover reset, every F4h-F7h read, drive/side writes and execution from
+  both ROM views.
 
-Done: `Cp500SystemRom` owns the flip-flop. While `A11Forced`, a ROM read at
-`a` returns EPROM byte `a | 0800h`.
+**Exit criterion met:** the supplied ROM reaches the monitor and disk-boot paths
+without host-side bank changes.
 
-```csharp
-byte ignored = machine.IoBus.In(0xF4); // Forces A11; 3000h now reads EPROM 3800h.
-Assert.True(machine.Rom.A11Forced);
-```
+### 2. Model III interrupt and signal fabric - done
 
-**Exit criterion:** the supplied ROM reaches monitor and disk-boot paths without
-host-side bank changes.
+- `Cp500InterruptDevice` has active-low masked IRQ sources at `E0h`, FDC INTRQ
+  masking/status at `E4h`, and acknowledge on `IN ECh`.
+- The IRQ is a level into `CpuZ80.SetInterruptLine`; NMI is an edge into
+  `NonMaskableInterrupt` (push PC, vector `0066h`).
+- The 30 Hz timer comes from emulated-cycle deadlines (`AdvanceCycles`). Host
+  throttling stays separate from hardware time.
+- Cassette sources are not modelled and no cassette API exists.
 
-### 2. Model III interrupt, reset, and signal fabric
+**Exit criterion met:** ROM handlers observe the expected status, masks,
+acknowledgement, IRQ and NMI behavior.
 
-- Replace the heartbeat-only device with active-low masked IRQ sources at `E0h`
-  and `E4h` FDC-INTRQ masking/status plus reset-NMI behavior.
-- Keep cassette-source bits inactive and expose no cassette API.
-- Present a CPU IRQ only when an enabled source transitions active. Add a
-  Z80 NMI entry point if missing, preserving PC push and vector `0066h`.
-- Generate the original 30 Hz timer from emulated-cycle deadlines. Keep host
-  throttling separate from hardware time.
-- Test acknowledge/mask behavior, simultaneous timer/FDC requests, reset-NMI,
-  and inactive cassette bits.
+### 3. Timed WD17xx with CPU WAIT - done
 
-**Exit criterion:** ROM and DOS handlers observe expected latch status, masks,
-acknowledgements, IRQ, and NMI behavior.
-
-### 3. Timed WD17xx with CPU WAIT
-
-- Replace immediate sector completion with a cycle-driven controller: command
-  delay, rotational arrival, DRQ byte windows, INTRQ completion, and motor
-  timeout derive from emulated cycles.
-- Implement restore, seek/step, read/write sector, force interrupt, read
-  address, read track, and write track. Report busy, DRQ, not-ready,
-  record-not-found, write-protect, CRC, and lost-data by command class.
-- Add a Z80 wait line. When disk WAIT is requested, no instruction may fetch or
-  retire until DRQ or INTRQ releases it; elapsed emulated time still advances.
-- Route FDC INTRQ through the interrupt controller, never straight to the CPU.
-- Test cycle boundaries, DRQ/INTRQ transitions, forced interruption, data-loss
-  timeout, write protection, and WAIT release.
+- `Wd1791Controller` is cycle driven: command delay, DRQ byte windows, INTRQ,
+  lost-data deadlines and a rotating index pulse. It implements restore,
+  seek/step, read/write sector, force interrupt, read address, read track and
+  write track, and reports busy, DRQ, not-ready, record-not-found,
+  write-protect, CRC and lost-data by command class.
+- `CpuZ80.WaitLine` stalls fetch while the latch holds WAIT; elapsed time
+  still advances. FDC INTRQ goes through the interrupt controller.
+- Installed drives: an installed drive reports TR00 without media; ready and
+  index need media; uninstalled drives are never ready. This reproduces the
+  ROM's `Diskette?` loop on empty drives.
 
 ```csharp
 while (machine.DiskControl.WaitActive)
-    machine.AdvanceCycles(4); // Hardware time passes; the CPU does not execute.
+    machine.Step(); // Hardware time passes; the CPU does not execute.
 ```
 
-**Exit criterion:** a disk ROM using WAIT and status polling boots a standard
-CP-500/Model III DOS image without FDC shortcuts.
+**Exit criterion met for the firmware:** the real ROM finds a disk, reads the
+boot sector with WAIT and status polling, and runs it
+(`RealRomRunsTheBootSectorOfAnInsertedDiskette`). Booting a full TRS-DOS or
+DOS-500 image is still to be run, see follow-ups.
 
-### 4. Native disk formats and host persistence
+### 4. Native disk formats and host persistence - done
 
-- Add JV1, JV3, and DMK parsers/serializers behind
-  `IModelIIIDiskImageProvider`; retain raw 180/360 KiB images as an explicit
-  simple format.
-- Make sector metadata available to the FDC: track/side, ID, density,
-  deleted-data marker, and CRC validity. Do not pre-flatten DMK/JV3 data.
-- Add desktop mount/eject/save-as, then browser persistence after codec tests.
-- Test valid fixtures, malformed-image rejection, round trips, and
-  format-specific sector lookup.
+- `ModelIIIDiskCodec` parses and serializes raw (180/360 KiB), JV3 and DMK
+  behind `IModelIIIDiskImageProvider`. A JV1 file is byte-identical to a raw 180 KiB
+  image, so it is the raw kind rather than a separate container.
+- Sector metadata (track/side, ID, density, deleted-data marker, CRC validity)
+  reaches the FDC without pre-flattening DMK/JV3 data.
+- Desktop mount/unmount for drives 0-3 with write-back in the source format
+  (`Cp500DriveBay`, `MainViewModel`, `ConfigDialog`); see
+  [../cp500/desktop-integration.md](../cp500/desktop-integration.md).
+- Tests cover valid fixtures, malformed-image rejection, round trips,
+  format-specific lookup and the persistence policy.
 
-**Exit criterion:** JV1, JV3, DMK, and raw images mount at native geometry and
-boot through the same WD17xx path.
+### 5. Model III video-control modes - done
 
-### 5. Model III video-control modes
+- `ECh` selects 32/64-column mode, the alternate character set and inverse
+  fallback rendering in `Cp500VideoDevice`; mode changes never mutate VRAM.
 
-- Add non-cassette video-control register `ECh`: 32/64-column selection and
-  character-set/inverse behavior.
-- Hold selected mode in `Cp500VideoDevice`; use CP500-2 glyphs when supplied,
-  retaining a fallback renderer otherwise.
-- Test register reads/writes, 32-column expansion, bit-7 graphics/inverse
-  semantics, and mode changes without VRAM mutation.
+## Follow-ups
 
-**Exit criterion:** software changes the visible width or character set through
-`ECh`; normal 64x16 BASIC output remains unchanged.
-
-## Dependencies and delivery
-
-Implement and merge in numeric order. Video work may proceed after phase 1,
-but disk formats must wait for the timed FDC contract. Run targeted device tests
-per phase, then CP/M regression tests and boot acceptance against user-supplied
-DOS media.
+- Browser disk mounting and IndexedDB persistence for CP-500 (the view model
+  already takes bytes plus a write-back delegate, so Browser only needs storage).
+- Boot a real TRS-DOS 1.3 / DOS-500 image to `DOS READY` (user-supplied media).
+- CP500-2 glyph rendering, an ABNT layout, and the M80/Turbo revisions.
 
 Related: [cp500-emulation.md](cp500-emulation.md),
 [../cp500/summary.md](../cp500/summary.md),

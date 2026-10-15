@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
 using Avalonia.Platform.Storage;
@@ -12,17 +13,24 @@ namespace Heh8080.Views;
 
 public partial class ConfigDialog : Window
 {
+    private readonly TextBlock[] _driveNumbers;
+    private readonly TextBlock[] _driveLabels;
+    private readonly Button[] _mountButtons;
+    private readonly Button[] _ejectButtons;
     private MainViewModel? _viewModel;
 
     public ConfigDialog()
     {
         InitializeComponent();
+        _driveNumbers = [DriveAPrefix, DriveBPrefix, DriveCPrefix, DriveDPrefix];
+        _driveLabels = [DriveALabel, DriveBLabel, DriveCLabel, DriveDLabel];
+        _mountButtons = [MountA, MountB, MountC, MountD];
+        _ejectButtons = [EjectA, EjectB, EjectC, EjectD];
     }
 
     public void SetViewModel(MainViewModel viewModel)
     {
         _viewModel = viewModel;
-        UpdateDriveLabels();
         UpdateCpuSelection();
         UpdateMachineSelection();
     }
@@ -30,11 +38,13 @@ public partial class ConfigDialog : Window
     private void UpdateMachineSelection()
     {
         if (_viewModel == null) return;
-        MachineCpm.IsChecked = _viewModel.MachineProfile == DesktopMachineProfile.Cpm;
-        MachineCp500.IsChecked = _viewModel.MachineProfile == DesktopMachineProfile.Cp500;
+        MachineCpm.IsChecked = _viewModel.ActiveMachine == EmulatedMachine.Cpm;
+        MachineCp500.IsChecked = _viewModel.ActiveMachine == EmulatedMachine.Cp500;
         MachineCp500.IsEnabled = _viewModel.IsCp500Available;
         CpuZ80.IsEnabled = !_viewModel.IsCp500;
         Cpu8080.IsEnabled = !_viewModel.IsCp500;
+        ResetHint.Text = _viewModel.IsCp500 ? "Restart the CP-500 ROM" : "Warm boot from A:";
+        UpdateDriveLabels();
     }
 
     private void UpdateCpuSelection()
@@ -48,59 +58,100 @@ public partial class ConfigDialog : Window
     {
         if (_viewModel == null) return;
 
-        DriveALabel.Text = _viewModel.DriveAPath ?? "(empty)";
-        DriveBLabel.Text = _viewModel.DriveBPath ?? "(empty)";
-        DriveCLabel.Text = _viewModel.DriveCPath ?? "(empty)";
-        DriveDLabel.Text = _viewModel.DriveDPath ?? "(empty)";
+        for (int drive = 0; drive < _driveLabels.Length; drive++)
+        {
+            bool installed = _viewModel.IsDriveInstalled(drive);
+            _driveNumbers[drive].Text = _viewModel.IsCp500 ? $"{drive}:" : $"{DriveLetter(drive)}:";
+            _driveLabels[drive].Text = installed ? _viewModel.GetDriveLabel(drive) ?? "(empty)" : "(no drive)";
+            _mountButtons[drive].IsEnabled = installed;
+            _ejectButtons[drive].IsEnabled = installed;
+        }
     }
+
+    private static char DriveLetter(int drive) => (char)('A' + drive);
 
     private async void MountA_Click(object? sender, RoutedEventArgs e) => await MountDisk(0);
     private async void MountB_Click(object? sender, RoutedEventArgs e) => await MountDisk(1);
     private async void MountC_Click(object? sender, RoutedEventArgs e) => await MountDisk(2);
     private async void MountD_Click(object? sender, RoutedEventArgs e) => await MountDisk(3);
 
-    private void UnmountA_Click(object? sender, RoutedEventArgs e) => UnmountDisk(0);
-    private void UnmountB_Click(object? sender, RoutedEventArgs e) => UnmountDisk(1);
-    private void UnmountC_Click(object? sender, RoutedEventArgs e) => UnmountDisk(2);
-    private void UnmountD_Click(object? sender, RoutedEventArgs e) => UnmountDisk(3);
+    private async void UnmountA_Click(object? sender, RoutedEventArgs e) => await UnmountDisk(0);
+    private async void UnmountB_Click(object? sender, RoutedEventArgs e) => await UnmountDisk(1);
+    private async void UnmountC_Click(object? sender, RoutedEventArgs e) => await UnmountDisk(2);
+    private async void UnmountD_Click(object? sender, RoutedEventArgs e) => await UnmountDisk(3);
 
-    private async System.Threading.Tasks.Task MountDisk(int drive)
+    private async Task MountDisk(int drive)
     {
         if (_viewModel == null) return;
 
+        bool cp500 = _viewModel.IsCp500;
         var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
         {
-            Title = $"Mount Disk Image to Drive {(char)('A' + drive)}:",
+            Title = cp500
+                ? $"Insert Disk Image in Drive {drive}"
+                : $"Mount Disk Image to Drive {DriveLetter(drive)}:",
             AllowMultiple = false,
             FileTypeFilter = new List<FilePickerFileType>
             {
-                new("Disk Images") { Patterns = new[] { "*.img", "*.dsk", "*.cpm" } },
+                cp500
+                    ? new("Disk Images") { Patterns = new[] { "*.dsk", "*.dmk", "*.jv3" } }
+                    : new("Disk Images") { Patterns = new[] { "*.img", "*.dsk", "*.cpm" } },
                 new("All Files") { Patterns = new[] { "*" } }
             }
         });
 
-        if (files.Count > 0)
-        {
-            var path = files[0].Path.LocalPath;
-            var diskProvider = _viewModel.DiskProvider as FileDiskImageProvider;
-            if (diskProvider != null)
-            {
-                diskProvider.Mount(drive, path, readOnly: false);
-                _viewModel.UpdateDriveStatus(drive, Path.GetFileName(path));
-                await _viewModel.MountAndBoot(drive);
-                UpdateDriveLabels();
-                StatusLabel.Text = $"Mounted to {(char)('A' + drive)}:";
-            }
-        }
+        if (files.Count == 0) return;
+
+        var path = files[0].Path.LocalPath;
+        if (cp500)
+            await MountCp500Disk(drive, path);
+        else
+            await MountCpmDisk(drive, path);
     }
 
-    private void UnmountDisk(int drive)
+    private async Task MountCpmDisk(int drive, string path)
+    {
+        var diskProvider = _viewModel!.DiskProvider as FileDiskImageProvider;
+        if (diskProvider == null) return;
+
+        diskProvider.Mount(drive, path, readOnly: false);
+        _viewModel.UpdateDriveStatus(drive, Path.GetFileName(path));
+        await _viewModel.MountAndBoot(drive);
+        UpdateDriveLabels();
+        StatusLabel.Text = $"Mounted to {DriveLetter(drive)}:";
+    }
+
+    private async Task MountCp500Disk(int drive, string path)
+    {
+        try
+        {
+            byte[] image = await File.ReadAllBytesAsync(path);
+            bool readOnly = new FileInfo(path).IsReadOnly;
+            await _viewModel!.MountCp500Disk(drive, image, Path.GetFileName(path), saved => SaveAtomically(path, saved), readOnly);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _viewModel!.StatusText = ex.Message;
+        }
+
+        UpdateDriveLabels();
+        StatusLabel.Text = _viewModel!.StatusText;
+    }
+
+    private static void SaveAtomically(string path, byte[] contents)
+    {
+        string temporary = path + ".tmp";
+        File.WriteAllBytes(temporary, contents);
+        File.Move(temporary, path, overwrite: true);
+    }
+
+    private async Task UnmountDisk(int drive)
     {
         if (_viewModel == null) return;
 
-        _viewModel.UnmountDiskCommand.Execute(drive);
+        await _viewModel.UnmountDiskCommand.ExecuteAsync(drive);
         UpdateDriveLabels();
-        StatusLabel.Text = $"Ejected {(char)('A' + drive)}:";
+        StatusLabel.Text = _viewModel.StatusText;
     }
 
     private async void Reset_Click(object? sender, RoutedEventArgs e)
@@ -123,17 +174,17 @@ public partial class ConfigDialog : Window
         }
     }
 
-    private async void MachineProfile_Click(object? sender, RoutedEventArgs e)
+    private async void Machine_Click(object? sender, RoutedEventArgs e)
     {
         if (_viewModel == null) return;
 
         var profile = MachineCp500.IsChecked == true
-            ? DesktopMachineProfile.Cp500
-            : DesktopMachineProfile.Cpm;
+            ? EmulatedMachine.Cp500
+            : EmulatedMachine.Cpm;
         try
         {
-            await _viewModel.SwitchMachineProfile(profile);
-            StatusLabel.Text = profile == DesktopMachineProfile.Cp500
+            await _viewModel.SwitchMachine(profile);
+            StatusLabel.Text = profile == EmulatedMachine.Cp500
                 ? "CP-500: cp500/cp500.rom"
                 : "CP/M profile running";
         }

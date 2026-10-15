@@ -394,6 +394,8 @@ internal sealed class TestDiskImageProvider : IDiskImageProvider
 
     public bool IsMounted(int drive) => drive >= 0 && drive < MaxDrives && _drives[drive] != null;
 
+    public bool Refresh(int drive) => IsMounted(drive);
+
     public void MountFromBytes(int drive, byte[] data)
     {
         if (drive < 0 || drive >= MaxDrives)

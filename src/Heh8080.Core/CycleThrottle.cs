@@ -21,9 +21,6 @@ public sealed class CycleThrottle
         _clock.Start();
     }
 
-    /// <summary>Configured processor frequency.</summary>
-    public long CyclesPerSecond => _cyclesPerSecond;
-
     /// <summary>
     /// Accounts for executed cycles and returns the delay needed to stay at the configured frequency.
     /// Callers can await this value with their platform's scheduler; no thread is slept here.

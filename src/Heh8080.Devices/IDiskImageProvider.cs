@@ -54,5 +54,5 @@ public interface IDiskImageProvider
     /// </summary>
     /// <param name="drive">Drive number (0-15)</param>
     /// <returns>True if refresh succeeded</returns>
-    bool Refresh(int drive) => IsMounted(drive);
+    bool Refresh(int drive);
 }

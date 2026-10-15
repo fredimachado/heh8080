@@ -26,6 +26,8 @@ public sealed class Cp500VideoDevice : IIoDevice
     /// <summary>Last mirrored video-control port.</summary>
     public const byte LastControlPort = 0xEF;
 
+    private const int HalfwidthKatakanaStart = 0xFF61;
+
     /// <summary>Observable video RAM region.</summary>
     public VideoRamRegion VideoRam { get; }
 
@@ -40,9 +42,6 @@ public sealed class Cp500VideoDevice : IIoDevice
 
     /// <summary>Whether ECh bit 3 selects the alternate character set.</summary>
     public bool AlternateCharacterSet => (ControlLatch & 0x08) != 0;
-
-    /// <summary>Whether ECh bit 7 forces inverse fallback rendering.</summary>
-    public bool InverseVideo => (ControlLatch & 0x80) != 0;
 
     /// <summary>Raised after one cell changes. Arguments are column, row, and character code.</summary>
     public event Action<int, int, byte>? CharacterChanged;
@@ -72,13 +71,6 @@ public sealed class Cp500VideoDevice : IIoDevice
     {
         ValidateCoordinate(column, row);
         return VideoRam.Read((ushort)(StartAddress + row * Columns + column));
-    }
-
-    /// <summary>Writes a character at a text coordinate.</summary>
-    public void WriteCharacter(int column, int row, byte character)
-    {
-        ValidateCoordinate(column, row);
-        VideoRam.Write((ushort)(StartAddress + row * Columns + column), character);
     }
 
     /// <summary>Registers the write side of ECh-EFh. Reads there acknowledge the timer interrupt.</summary>
@@ -115,12 +107,24 @@ public sealed class Cp500VideoDevice : IIoDevice
 
         int memoryColumn = Is32ColumnMode ? visibleColumn * 2 : visibleColumn;
         byte raw = ReadCharacter(memoryColumn, row);
-        bool bit7 = (raw & 0x80) != 0;
-        bool graphics = bit7 && AlternateCharacterSet;
-        bool inverse = InverseVideo || (bit7 && !AlternateCharacterSet);
-        byte glyph = graphics ? raw : (byte)(raw & 0x7F);
-        return new Cp500RenderedCell(raw, glyph, inverse, graphics, AlternateCharacterSet);
+        return new Cp500RenderedCell(raw, MapGlyph(raw, AlternateCharacterSet), Is32ColumnMode);
     }
+
+    /// <summary>
+    /// Maps a text code to a Unicode character. Codes 01h-1Fh show their 40h-5Fh counterparts and
+    /// 00h is blank. Codes C0h-FFh show the Katakana set as halfwidth Unicode katakana when the alternate
+    /// set is selected. Otherwise they stand in for the special set with the 40h-7Fh character sharing their low six bits.
+    /// Codes 80h-BFh are block graphics and have no glyph.
+    /// </summary>
+    private static char MapGlyph(byte raw, bool alternateCharacterSet) => raw switch
+    {
+        0x00 or (>= 0x80 and < 0xC0) => ' ',
+        < 0x20 => (char)(raw + 0x40),
+        < 0x80 => (char)raw,
+        0xC0 when alternateCharacterSet => ' ',
+        _ when alternateCharacterSet => (char)(HalfwidthKatakanaStart + raw - 0xC1),
+        _ => (char)(0x40 + (raw & 0x3F))
+    };
 
     /// <summary>Resets the video-control latch without mutating VRAM.</summary>
     public void ResetControl()
@@ -147,10 +151,15 @@ public sealed class Cp500VideoDevice : IIoDevice
     }
 }
 
-/// <summary>Fallback-renderer description of one CP-500 video cell.</summary>
-public readonly record struct Cp500RenderedCell(
-    byte Raw,
-    byte Glyph,
-    bool Inverse,
-    bool Graphics,
-    bool AlternateCharacterSet);
+/// <summary>Host-renderer description of one displayed CP-500 video cell.</summary>
+/// <param name="Raw">The video RAM byte.</param>
+/// <param name="Glyph">The character to draw. Blank for block graphics.</param>
+/// <param name="DoubleWidth">Whether 32-column mode shows this cell at twice the normal width.</param>
+public readonly record struct Cp500RenderedCell(byte Raw, char Glyph, bool DoubleWidth)
+{
+    /// <summary>Whether this is a 2x3 block graphic (80h-BFh) rather than a character.</summary>
+    public bool Graphics => Raw is >= 0x80 and < 0xC0;
+
+    /// <summary>Lit blocks of a graphic: bit 0 top left, bit 1 top right, down to bit 5 bottom right.</summary>
+    public byte Blocks => Graphics ? (byte)(Raw & 0x3F) : (byte)0;
+}

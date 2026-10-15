@@ -1,5 +1,5 @@
 using System;
-using System.Diagnostics;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Threading;
@@ -8,11 +8,10 @@ using CommunityToolkit.Mvvm.Input;
 using Heh8080.Core;
 using Heh8080.Devices;
 using Heh8080.Terminal;
-using Heh8080.UI.Diagnostics;
 
 namespace Heh8080.UI.ViewModels;
 
-public enum DesktopMachineProfile
+public enum EmulatedMachine
 {
     Cpm,
     Cp500
@@ -25,6 +24,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private readonly Adm3aTerminal _terminal;
     private CpuType _cpuType = CpuType.ZilogZ80;
     private readonly byte[]? _cp500Rom;
+    private readonly Cp500DriveBay _cp500Drives = new();
     private Cp500Machine? _cp500Machine;
     private CancellationTokenSource? _cp500Cancellation;
     private Task? _cp500RunTask;
@@ -62,12 +62,13 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public bool IsRunning => _emulator.IsRunning;
     public CpuType CpuType => _cpuType;
     public string CpuTypeName => _cpuType == CpuType.ZilogZ80 ? "Z80" : "8080";
-    public DesktopMachineProfile MachineProfile { get; private set; } = DesktopMachineProfile.Cpm;
-    public bool IsCp500 => MachineProfile == DesktopMachineProfile.Cp500;
+    public EmulatedMachine ActiveMachine { get; private set; } = EmulatedMachine.Cpm;
+    public bool IsCp500 => ActiveMachine == EmulatedMachine.Cp500;
     public bool IsCp500Available => _cp500Rom is { Length: > 0 };
+    public int Cp500InstalledDrives => Cp500MachineProfile.Original.InstalledDrives;
     public Cp500VideoDevice? Cp500Video => _cp500Machine?.Video;
     public Cp500KeyboardDevice? Cp500Keyboard => _cp500Machine?.Keyboard;
-    public event Action? MachineProfileChanged;
+    public event Action? ActiveMachineChanged;
 
     public MainViewModel(IDiskImageProvider diskProvider, byte[]? cp500Rom = null)
     {
@@ -293,12 +294,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         StatusText = $"Switched to {CpuTypeName}";
     }
 
-    public async Task SwitchMachineProfile(DesktopMachineProfile profile)
+    public async Task SwitchMachine(EmulatedMachine machine)
     {
-        if (profile == MachineProfile)
+        if (machine == ActiveMachine)
             return;
 
-        if (profile == DesktopMachineProfile.Cp500)
+        if (machine == EmulatedMachine.Cp500)
         {
             if (_cp500Rom is not { Length: > 0 })
                 throw new InvalidOperationException(
@@ -306,15 +307,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
             await _emulator.StopAsync();
             StopInterruptTimer();
-            if (_cp500Machine == null)
-            {
-                _cp500Machine = new Cp500Machine(Cp500MachineProfile.Original, _cp500Rom);
-                AttachCp500Diagnostics(_cp500Machine);
-            }
+            _cp500Machine ??= new Cp500Machine(Cp500MachineProfile.Original, _cp500Rom, _cp500Drives.Images);
             _cp500Machine.Reset();
-            Cp500DiagnosticTrace.Write("machine-reset profile=original");
-            MachineProfile = profile;
-            MachineProfileChanged?.Invoke();
+            ActiveMachine = machine;
+            ActiveMachineChanged?.Invoke();
             StartCp500();
             StatusText = "CP-500 running";
             return;
@@ -322,8 +318,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         await StopCp500Async();
         _cp500Machine?.Keyboard.ReleaseAll();
-        MachineProfile = profile;
-        MachineProfileChanged?.Invoke();
+        FlushCp500Disks();
+        ActiveMachine = machine;
+        ActiveMachineChanged?.Invoke();
         await Reset();
     }
 
@@ -336,8 +333,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private async Task RunCp500Async(CancellationToken cancellationToken)
     {
         Cp500Machine machine = _cp500Machine!;
-        long heartbeatPeriod = Stopwatch.Frequency / 30;
-        long nextHeartbeat = Stopwatch.GetTimestamp() + heartbeatPeriod;
 
         try
         {
@@ -347,13 +342,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
                 int executedCycles = 0;
                 for (; executedCycles < batchCycleLimit && !cancellationToken.IsCancellationRequested;)
                     executedCycles += machine.Step();
-
-                long now = Stopwatch.GetTimestamp();
-                while (now >= nextHeartbeat)
-                {
-                    machine.TickInterrupt();
-                    nextHeartbeat += heartbeatPeriod;
-                }
 
                 TimeSpan delay = machine.LastSuggestedDelay;
                 if (delay >= TimeSpan.FromMilliseconds(1))
@@ -369,17 +357,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             Dispatcher.UIThread.Post(() => StatusText = $"CP-500 error: {ex.Message}");
         }
-    }
-
-    private static void AttachCp500Diagnostics(Cp500Machine machine)
-    {
-        machine.Keyboard.KeyStateChanged += (row, column, pressed) =>
-            Cp500DiagnosticTrace.Write($"matrix-state row={row} column={column} pressed={pressed}");
-        machine.Keyboard.Matrix.ReadObserved += (rowMask, value) =>
-        {
-            if (machine.Keyboard.HasPressedKeys || value != 0)
-                Cp500DiagnosticTrace.Write($"matrix-read mask={rowMask:X2} value={value:X2}");
-        };
     }
 
     private async Task StopCp500Async()
@@ -401,6 +378,68 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             _cp500Cancellation.Dispose();
             _cp500Cancellation = null;
             _cp500RunTask = null;
+        }
+    }
+
+    /// <summary>Name of the disk in a drive of the active machine, or null when the drive is empty.</summary>
+    public string? GetDriveLabel(int drive) => IsCp500
+        ? _cp500Drives.NameOf(drive)
+        : drive switch
+        {
+            0 => DriveAPath,
+            1 => DriveBPath,
+            2 => DriveCPath,
+            3 => DriveDPath,
+            _ => null
+        };
+
+    /// <summary>Whether the active machine has a drive with this number.</summary>
+    public bool IsDriveInstalled(int drive) => IsCp500 ? drive < Cp500InstalledDrives : drive is >= 0 and < 4;
+
+    /// <summary>
+    /// Inserts a disk image file into a CP-500 drive while the CPU is paused. A disk written to is handed to
+    /// <paramref name="writeBack"/> in its source format when it is ejected, replaced, the machine is switched or the app
+    /// shuts down, unless it is read-only. Failures are reported through <see cref="StatusText"/>.
+    /// </summary>
+    public async Task MountCp500Disk(int drive, byte[] image, string name, Action<byte[]>? writeBack, bool readOnly = false)
+    {
+        try
+        {
+            await WithCp500Paused(() => _cp500Drives.Insert(drive, image, name, writeBack, readOnly));
+            StatusText = $"Inserted {name} in drive {drive}";
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            StatusText = $"Could not insert {name}: {ex.Message}";
+        }
+    }
+
+    private async Task WithCp500Paused(Action action)
+    {
+        bool wasRunning = _cp500Cancellation != null;
+        await StopCp500Async();
+        try
+        {
+            action();
+        }
+        finally
+        {
+            if (wasRunning)
+                StartCp500();
+        }
+    }
+
+    private bool FlushCp500Disks()
+    {
+        try
+        {
+            _cp500Drives.Flush();
+            return true;
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusText = $"Could not save a disk: {ex.Message}";
+            return false;
         }
     }
 
@@ -453,16 +492,36 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     }
 
     [RelayCommand]
-    public void UnmountDisk(int drive)
+    public async Task UnmountDisk(int drive)
     {
+        if (IsCp500)
+        {
+            await EjectCp500Disk(drive);
+            return;
+        }
+
         _diskProvider.Unmount(drive);
         UpdateDriveStatus(drive, null);
         StatusText = $"Unmounted {(char)('A' + drive)}:";
     }
 
+    private async Task EjectCp500Disk(int drive)
+    {
+        try
+        {
+            await WithCp500Paused(() => _cp500Drives.Eject(drive));
+            StatusText = $"Ejected drive {drive}";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusText = $"Could not save drive {drive}, disk kept: {ex.Message}";
+        }
+    }
+
     public void Dispose()
     {
         StopCp500Async().GetAwaiter().GetResult();
+        FlushCp500Disks();
         StopInterruptTimer();
         _emulator.StopAsync().Wait(TimeSpan.FromSeconds(1));
         _emulator.Dispose();

@@ -14,6 +14,7 @@ public sealed class Cp500SystemRom : MemoryRegion, IIoDevice
 
     private const int A11 = 0x0800;
     private readonly byte[] _data = new byte[Cp500MachineProfile.SystemRomSizeBytes];
+    private bool _a11Forced;
 
     /// <summary>Copies a ROM image, padding a short image with erased-EPROM FFh bytes.</summary>
     public Cp500SystemRom(ReadOnlySpan<byte> image)
@@ -23,27 +24,15 @@ public sealed class Cp500SystemRom : MemoryRegion, IIoDevice
         image[..Math.Min(image.Length, _data.Length)].CopyTo(_data);
     }
 
-    /// <summary>Whether the ROM responds to reads. M80 profiles can disable it to expose low RAM.</summary>
-    public bool Enabled { get; set; } = true;
-
-    /// <summary>Whether the F4h-F7h flip-flop currently forces address line A11 high.</summary>
-    public bool A11Forced { get; private set; }
-
-    public override bool Handles(ushort address) => Enabled && base.Handles(address);
-
-    public override byte Read(ushort address) => _data[GetOffset(address) | (A11Forced ? A11 : 0)];
+    public override byte Read(ushort address) => _data[GetOffset(address) | (_a11Forced ? A11 : 0)];
 
     /// <summary>ROM writes are ignored.</summary>
     public override void Write(ushort address, byte value)
     {
     }
 
-    /// <summary>Re-enables the ROM and clears the A11 flip-flop.</summary>
-    public void Reset()
-    {
-        Enabled = true;
-        A11Forced = false;
-    }
+    /// <summary>Clears the A11 flip-flop.</summary>
+    public void Reset() => _a11Forced = false;
 
     /// <summary>Registers the read side of F4h-F7h. Writes there select disk drives.</summary>
     public void Register(IoBus bus)
@@ -54,7 +43,7 @@ public sealed class Cp500SystemRom : MemoryRegion, IIoDevice
 
     public byte In(byte port)
     {
-        A11Forced = !A11Forced;
+        _a11Forced = !_a11Forced;
         return 0x00;
     }
 
