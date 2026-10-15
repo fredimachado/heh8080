@@ -8,7 +8,11 @@ namespace Heh8080.Devices;
 /// </summary>
 public sealed class Cp500Machine
 {
+    /// <summary>Emulated time <see cref="ResetHoldingBreak"/> holds BREAK. The ROM needs at least half a second.</summary>
+    public static readonly TimeSpan BreakHoldDuration = TimeSpan.FromSeconds(1);
+
     private readonly CycleThrottle _throttle;
+    private long _breakCyclesRemaining;
 
     /// <summary>Builds a CP-500 machine from a user-supplied ROM image and pluggable host devices.</summary>
     public Cp500Machine(
@@ -26,7 +30,8 @@ public sealed class Cp500Machine
         Video = new Cp500VideoDevice();
 
         Memory = new MappedMemory(
-            new KeyboardMatrixRegion(Cp500KeyboardDevice.StartAddress, Cp500KeyboardDevice.Length, Keyboard.Matrix),
+            new KeyboardMatrixRegion(
+                Cp500KeyboardDevice.StartAddress, Cp500KeyboardDevice.Length, Keyboard.Matrix, Keyboard.Automatic),
             Video.VideoRam,
             Rom,
             new RamMemoryRegion(0x4000, profile.RamSizeBytes));
@@ -104,6 +109,7 @@ public sealed class Cp500Machine
         int cycles = Cpu.Step();
         DiskController.AdvanceCycles(cycles);
         Interrupts.AdvanceCycles(cycles);
+        AdvanceBreakHold(cycles);
         Cpu.WaitLine = DiskControl.WaitActive;
         LastSuggestedDelay = _throttle.GetDelay(cycles);
         return cycles;
@@ -121,5 +127,29 @@ public sealed class Cp500Machine
         Video.ResetControl();
         _throttle.Reset();
         LastSuggestedDelay = TimeSpan.Zero;
+        _breakCyclesRemaining = 0;
+        Keyboard.SetAutomaticBreak(false);
+    }
+
+    /// <summary>
+    /// Resets like <see cref="Reset"/> and holds BREAK for <see cref="BreakHoldDuration"/> of emulated time, counted
+    /// down in <see cref="Step"/>. The ROM then skips the disk boot and offers BASIC, the Model III way to start
+    /// without a boot disk. The hold is separate from host keys, which neither disturb nor release it.
+    /// </summary>
+    public void ResetHoldingBreak()
+    {
+        Reset();
+        _breakCyclesRemaining = (long)(BreakHoldDuration.TotalSeconds * Profile.ClockHz);
+        Keyboard.SetAutomaticBreak(true);
+    }
+
+    private void AdvanceBreakHold(int cycles)
+    {
+        if (_breakCyclesRemaining == 0)
+            return;
+
+        _breakCyclesRemaining = Math.Max(0, _breakCyclesRemaining - cycles);
+        if (_breakCyclesRemaining == 0)
+            Keyboard.SetAutomaticBreak(false);
     }
 }

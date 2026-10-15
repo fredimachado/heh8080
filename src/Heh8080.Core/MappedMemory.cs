@@ -295,16 +295,24 @@ public sealed class KeyboardMatrix
 /// </summary>
 public sealed class KeyboardMatrixRegion : MemoryRegion
 {
-    private readonly KeyboardMatrix _matrix;
+    private readonly KeyboardMatrix[] _matrices;
 
-    /// <summary>Creates a keyboard range. Its low address byte selects matrix rows.</summary>
-    public KeyboardMatrixRegion(ushort startAddress, int length, KeyboardMatrix matrix)
+    /// <summary>Creates a keyboard range. Its low address byte selects matrix rows; several matrices are ORed.</summary>
+    public KeyboardMatrixRegion(ushort startAddress, int length, params KeyboardMatrix[] matrices)
         : base(startAddress, length)
     {
-        _matrix = matrix ?? throw new ArgumentNullException(nameof(matrix));
+        ArgumentNullException.ThrowIfNull(matrices);
+        _matrices = matrices;
     }
 
-    public override byte Read(ushort address) => _matrix.Read((byte)address);
+    public override byte Read(ushort address)
+    {
+        byte result = 0;
+        foreach (KeyboardMatrix matrix in _matrices)
+            result |= matrix.Read((byte)address);
+
+        return result;
+    }
 
     /// <summary>Keyboard writes are ignored.</summary>
     public override void Write(ushort address, byte value)

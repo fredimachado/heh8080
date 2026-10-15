@@ -263,103 +263,19 @@ public sealed class MappedMemoryPageTableTests
 public sealed class Cp500VideoDeviceTests
 {
     [Theory]
-    [InlineData(0x80, 0x00)]
-    [InlineData(0x81, 0x01)]
-    [InlineData(0xBF, 0x3F)]
-    [InlineData(0xA5, 0x25)]
-    public void CodesBetween80AndBFAreAlwaysBlockGraphics(byte code, byte blocks)
-    {
-        var video = VideoWith(code);
-
-        foreach (byte control in new byte[] { 0x00, 0x08 })
-        {
-            video.Out(Cp500VideoDevice.ControlPort, control);
-            var cell = video.GetRenderedCell(0, 0);
-
-            Assert.True(cell.Graphics);
-            Assert.Equal(blocks, cell.Blocks);
-            Assert.Equal(' ', cell.Glyph);
-        }
-    }
-
-    [Theory]
-    [InlineData(0x20, ' ')]
-    [InlineData(0x41, 'A')]
-    [InlineData(0x61, 'a')]
-    [InlineData(0x01, 'A')]
-    [InlineData(0x1A, 'Z')]
-    [InlineData(0x00, ' ')]
-    public void PlainTextCodesDrawTheirCharacter(byte code, char glyph)
-    {
-        var cell = VideoWith(code).GetRenderedCell(0, 0);
-
-        Assert.False(cell.Graphics);
-        Assert.Equal(0, cell.Blocks);
-        Assert.Equal(glyph, cell.Glyph);
-    }
-
-    [Theory]
-    [InlineData(0xC1, '\uFF61')]
-    [InlineData(0xFF, '\uFF9F')]
-    [InlineData(0xC0, ' ')]
-    public void AlternateSetShowsHalfwidthKatakanaForCodesC0ThroughFF(byte code, char glyph)
-    {
-        var video = VideoWith(code);
-        video.Out(Cp500VideoDevice.ControlPort, 0x08);
-
-        var cell = video.GetRenderedCell(0, 0);
-
-        Assert.False(cell.Graphics);
-        Assert.Equal(glyph, cell.Glyph);
-    }
-
-    [Theory]
-    [InlineData(0xC0, '@')]
-    [InlineData(0xC1, 'A')]
-    [InlineData(0xFF, '\u007F')]
-    public void SpecialSetStandsInWithTheCharacterSharingTheLowSixBits(byte code, char glyph)
-    {
-        var cell = VideoWith(code).GetRenderedCell(0, 0);
-
-        Assert.False(cell.Graphics);
-        Assert.Equal(glyph, cell.Glyph);
-    }
-
-    [Fact]
-    public void Bit7OfTheControlLatchIsNotAVideoFeature()
-    {
-        var video = VideoWith(0x41);
-        var before = video.GetRenderedCell(0, 0);
-
-        video.Out(Cp500VideoDevice.ControlPort, 0x80);
-
-        Assert.Equal(before, video.GetRenderedCell(0, 0));
-    }
-
-    [Fact]
-    public void ThirtyTwoColumnModeShowsEveryOtherVramColumnAtDoubleWidth()
+    [InlineData(0x00, 64, false, false)]
+    [InlineData(0x04, 32, true, false)]
+    [InlineData(0x08, 64, false, true)]
+    [InlineData(0x80, 64, false, false)]
+    public void ControlLatchBitsSelectColumnsAndTheAlternateSet(byte control, int columns, bool wide, bool alternate)
     {
         var video = new Cp500VideoDevice();
-        video.VideoRam.Write(0x3C00, (byte)'A');
-        video.VideoRam.Write(0x3C01, (byte)'B');
-        video.VideoRam.Write(0x3C02, (byte)'C');
 
-        video.Out(Cp500VideoDevice.ControlPort, 0x04);
+        video.Out(Cp500VideoDevice.ControlPort, control);
 
-        Assert.Equal(32, video.VisibleColumns);
-        Assert.Equal('A', video.GetRenderedCell(0, 0).Glyph);
-        Assert.Equal('C', video.GetRenderedCell(1, 0).Glyph);
-        Assert.True(video.GetRenderedCell(1, 0).DoubleWidth);
-        Assert.Throws<ArgumentOutOfRangeException>(() => video.GetRenderedCell(32, 0));
-    }
-
-    [Fact]
-    public void SixtyFourColumnModeIsSingleWidth()
-    {
-        var video = VideoWith(0x41);
-
-        Assert.Equal(64, video.VisibleColumns);
-        Assert.False(video.GetRenderedCell(63, 15).DoubleWidth);
+        Assert.Equal(columns, video.VisibleColumns);
+        Assert.Equal(wide, video.Is32ColumnMode);
+        Assert.Equal(alternate, video.AlternateCharacterSet);
     }
 
     [Fact]

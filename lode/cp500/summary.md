@@ -42,7 +42,10 @@ graph TD
 ## Contracts and invariants
 
 - A non-empty, user-supplied ROM is required. The machine copies at most the
-  16 KiB ROM-socket image; it never reads files or embeds ROM data.
+  16 KiB ROM-socket image; it never reads files or embeds ROM data. The 2 KiB
+  character generator is not part of the machine: it only matters to hosts that
+  draw the screen (`Cp500CharacterGenerator`, `Cp500Raster`, see
+  [devices.md](devices.md)).
 - `Cp500MachineProfile` holds RAM (16, 32 or 48 KiB from `4000h`), the clock
   (2.03 MHz) and the installed disk drive count (0-4, default 2; zero is a
   cassette-only machine). Only the original 48 KiB, 2.03 MHz configuration is
@@ -81,8 +84,10 @@ when the gitignored ROM is absent).
 1. Drives installed and empty (default profile, nothing mounted): the ROM
    restores drive 0, sees TR00 (an installed drive reports track 0 whether or
    not it holds media), then waits for index pulses, which only a mounted disk
-   produces. On timeout it prints `Diskette?` and retries forever. The loop
-   never reads the keyboard, so BREAK does nothing and BASIC is unreachable.
+   produces. On timeout it prints `Diskette?` and retries forever. That loop
+   never reads the keyboard, so BREAK pressed there is ignored. BREAK held
+   from reset is different: the ROM samples it before the disk wait and goes
+   to `BASIC (S ou N)?` (see `ResetHoldingBreak` below).
 2. A mounted disk: five index pulses, then READ SECTOR 1 into `4300h` and a
    jump there. A disk without a boot loader (blank or unformatted) executes
    filler bytes and the machine is lost, which is the real hardware behavior.
@@ -93,8 +98,24 @@ when the gitignored ROM is absent).
    size). The ROM prints `PROLOGICA  1981  BASIC` and `READY`. A prompt that
    repeats by itself means phantom key presses, not a firmware timeout.
 
-BASIC is therefore reached from the desktop only by a profile without drives;
-with drives, the ROM expects a bootable disk (TRS-DOS, DOS-500 and similar).
+With drives, the ROM expects a bootable disk (TRS-DOS, DOS-500 and similar);
+BASIC without one is reached by holding BREAK through reset or by a profile
+without drives.
+
+### Reset holding BREAK
+
+`Cp500Machine.ResetHoldingBreak()` resets and then keeps BREAK (matrix row 6,
+column 2) closed for `BreakHoldDuration` (1 s) of emulated time, long enough
+for the ROM to sample it (it needs about 0.5 s). The countdown runs in `Step`
+from executed cycles, so it is deterministic and uses no wall clock. The held
+BREAK is a separate input (`Cp500KeyboardDevice.Automatic`) that the keyboard
+region ORs with the host matrix, so releasing host keys (focus loss) never
+drops it and a host key the user holds is never overwritten. A plain `Reset()`
+cancels a pending hold. The desktop view model chooses it automatically on
+CP-500 start and reset whenever drive 0 has no disk, see
+[desktop-integration.md](desktop-integration.md). Tests: the machine-level
+countdown tests and `RealRomWithEmptyDrivesResetHoldingBreakReachesBasic` in
+`Cp500Tests.cs`.
 
 ## Rationale and lessons
 

@@ -93,8 +93,14 @@ graph TB
   CPU clock. Cassette and RS-232 sources are not modelled.
   `Cp500CassettePort` answers `FFh` with 00h and discards writes.
 - `Cp500VideoDevice` owns `ECh-EFh` writes (non-cassette video control). Bit 2
-  selects 32-column rendering, bit 3 selects the alternate character set, and
-  bit 7 forces inverse fallback rendering. Mode changes do not mutate VRAM.
+  selects 32-column rendering and bit 3 selects the alternate (katakana)
+  character set for `C0h-FFh`. Mode changes do not mutate VRAM.
+- `Cp500CharacterGenerator` wraps the 2 KiB character ROM (256 glyphs of 8
+  bytes, bit 7 leftmost; 00-1F Portuguese letters, 20-7F ASCII, 80-BF special
+  symbols, C0-FF katakana) and rejects any other size. `Cp500Raster.Render`
+  turns a VRAM snapshot plus the ECh value into a 512 by 192 one-byte-per-pixel
+  frame; `Cp500VideoDevice.Render` is the convenience wrapper. Both are free
+  of UI types. Mapping and rendering: [desktop-integration.md](desktop-integration.md).
 - `Cp500PrinterPort` is an `F8h-FBh` adapter: output goes to an optional
   `IPrinterDevice`, status reads ready (select, no fault) unless the printer
   reports busy.

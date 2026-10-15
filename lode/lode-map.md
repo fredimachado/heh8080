@@ -20,10 +20,10 @@
 - [devices/devices.md](devices/devices.md) - Device layer implementation
 
 ## CP-500
-- [cp500/summary.md](cp500/summary.md) - Reusable CP-500 machine composition and ROM boot flow
+- [cp500/summary.md](cp500/summary.md) - Reusable CP-500 machine composition, ROM boot flow and BREAK-held reset
 - [cp500/memory-map.md](cp500/memory-map.md) - Mapped-ROM/RAM/VRAM/keyboard contract
 - [cp500/devices.md](cp500/devices.md) - CP-500 peripherals, WD1791, disk images, drive bay and keyboard contracts
-- [cp500/desktop-integration.md](cp500/desktop-integration.md) - Avalonia machine selection, display, input, disk mounting and execution host
+- [cp500/desktop-integration.md](cp500/desktop-integration.md) - Avalonia machine selection, display, input, disk mounting, character-generator rendering and execution host
 
 ## Terminal
 - [terminal/terminal.md](terminal/terminal.md) - ADM-3A terminal emulator

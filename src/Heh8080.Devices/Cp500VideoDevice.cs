@@ -4,7 +4,8 @@ namespace Heh8080.Devices;
 
 /// <summary>
 /// CP-500 Model III text video RAM: 64 columns by 16 rows at 3C00h-3FFFh.
-/// Rendering is deliberately left to a host UI; this device owns the observable character plane.
+/// Scaling and display are left to a host UI; this device owns the observable character plane and rasterizes it
+/// with <see cref="Cp500Raster"/>.
 /// </summary>
 public sealed class Cp500VideoDevice : IIoDevice
 {
@@ -26,7 +27,11 @@ public sealed class Cp500VideoDevice : IIoDevice
     /// <summary>Last mirrored video-control port.</summary>
     public const byte LastControlPort = 0xEF;
 
-    private const int HalfwidthKatakanaStart = 0xFF61;
+    /// <summary>ECh bit that selects 32-column expanded text.</summary>
+    public const byte ThirtyTwoColumnBit = 0x04;
+
+    /// <summary>ECh bit that selects the alternate (katakana) character set for codes C0h-FFh.</summary>
+    public const byte AlternateCharacterSetBit = 0x08;
 
     /// <summary>Observable video RAM region.</summary>
     public VideoRamRegion VideoRam { get; }
@@ -38,10 +43,10 @@ public sealed class Cp500VideoDevice : IIoDevice
     public int VisibleColumns => Is32ColumnMode ? 32 : 64;
 
     /// <summary>Whether ECh bit 2 selects 32-column expanded text.</summary>
-    public bool Is32ColumnMode => (ControlLatch & 0x04) != 0;
+    public bool Is32ColumnMode => (ControlLatch & ThirtyTwoColumnBit) != 0;
 
     /// <summary>Whether ECh bit 3 selects the alternate character set.</summary>
-    public bool AlternateCharacterSet => (ControlLatch & 0x08) != 0;
+    public bool AlternateCharacterSet => (ControlLatch & AlternateCharacterSetBit) != 0;
 
     /// <summary>Raised after one cell changes. Arguments are column, row, and character code.</summary>
     public event Action<int, int, byte>? CharacterChanged;
@@ -97,34 +102,12 @@ public sealed class Cp500VideoDevice : IIoDevice
         ControlChanged?.Invoke(ControlLatch);
     }
 
-    /// <summary>Returns the VRAM-backed cell visible at a display coordinate.</summary>
-    public Cp500RenderedCell GetRenderedCell(int visibleColumn, int row)
-    {
-        if ((uint)visibleColumn >= VisibleColumns)
-            throw new ArgumentOutOfRangeException(nameof(visibleColumn));
-        if ((uint)row >= Rows)
-            throw new ArgumentOutOfRangeException(nameof(row));
-
-        int memoryColumn = Is32ColumnMode ? visibleColumn * 2 : visibleColumn;
-        byte raw = ReadCharacter(memoryColumn, row);
-        return new Cp500RenderedCell(raw, MapGlyph(raw, AlternateCharacterSet), Is32ColumnMode);
-    }
-
     /// <summary>
-    /// Maps a text code to a Unicode character. Codes 01h-1Fh show their 40h-5Fh counterparts and
-    /// 00h is blank. Codes C0h-FFh show the Katakana set as halfwidth Unicode katakana when the alternate
-    /// set is selected. Otherwise they stand in for the special set with the 40h-7Fh character sharing their low six bits.
-    /// Codes 80h-BFh are block graphics and have no glyph.
+    /// Rasterizes a snapshot of the current video RAM and control latch into a <see cref="Cp500Raster"/> frame.
+    /// Safe to call while the CPU runs: a cell changing mid-copy shows either its old or new value.
     /// </summary>
-    private static char MapGlyph(byte raw, bool alternateCharacterSet) => raw switch
-    {
-        0x00 or (>= 0x80 and < 0xC0) => ' ',
-        < 0x20 => (char)(raw + 0x40),
-        < 0x80 => (char)raw,
-        0xC0 when alternateCharacterSet => ' ',
-        _ when alternateCharacterSet => (char)(HalfwidthKatakanaStart + raw - 0xC1),
-        _ => (char)(0x40 + (raw & 0x3F))
-    };
+    public void Render(Cp500CharacterGenerator generator, Span<byte> frame) =>
+        Cp500Raster.Render(generator, VideoRam.ToArray(), ControlLatch, frame);
 
     /// <summary>Resets the video-control latch without mutating VRAM.</summary>
     public void ResetControl()
@@ -149,17 +132,4 @@ public sealed class Cp500VideoDevice : IIoDevice
         if ((uint)row >= Rows)
             throw new ArgumentOutOfRangeException(nameof(row));
     }
-}
-
-/// <summary>Host-renderer description of one displayed CP-500 video cell.</summary>
-/// <param name="Raw">The video RAM byte.</param>
-/// <param name="Glyph">The character to draw. Blank for block graphics.</param>
-/// <param name="DoubleWidth">Whether 32-column mode shows this cell at twice the normal width.</param>
-public readonly record struct Cp500RenderedCell(byte Raw, char Glyph, bool DoubleWidth)
-{
-    /// <summary>Whether this is a 2x3 block graphic (80h-BFh) rather than a character.</summary>
-    public bool Graphics => Raw is >= 0x80 and < 0xC0;
-
-    /// <summary>Lit blocks of a graphic: bit 0 top left, bit 1 top right, down to bit 5 bottom right.</summary>
-    public byte Blocks => Graphics ? (byte)(Raw & 0x3F) : (byte)0;
 }

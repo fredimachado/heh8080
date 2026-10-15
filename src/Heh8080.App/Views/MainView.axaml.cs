@@ -59,6 +59,7 @@ public partial class MainView : UserControl
             return;
 
         Terminal.Terminal = _viewModel.IsCp500 ? null : _viewModel.Terminal;
+        Terminal.Cp500Characters = _viewModel.IsCp500 ? _viewModel.Cp500Characters : null;
         Terminal.Cp500Video = _viewModel.IsCp500 ? _viewModel.Cp500Video : null;
         Terminal.Cp500Keyboard = _viewModel.IsCp500 ? _viewModel.Cp500Keyboard : null;
         DisplaySizeChanged?.Invoke();

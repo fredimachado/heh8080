@@ -14,12 +14,20 @@ public sealed class Cp500KeyboardDevice
     /// <summary>Size of the mirrored keyboard range.</summary>
     public const int Length = 0x400;
 
-    /// <summary>Underlying matrix shared by the memory region.</summary>
+    private static readonly Cp500KeyStroke Break = Cp500KeyMap.Map(Cp500HostKey.Escape);
+
+    /// <summary>Matrix of the keys the host user holds. The memory region ORs it with the automatic BREAK.</summary>
     public KeyboardMatrix Matrix { get; } = new();
+
+    /// <summary>Keys the machine itself holds, so host key events and focus loss can never touch them.</summary>
+    public KeyboardMatrix Automatic { get; } = new();
 
     /// <summary>Updates one matrix switch. Row and column values are in the range 0-7.</summary>
     public void SetKeyState(int row, int column, bool pressed) => Matrix.SetKeyState(row, column, pressed);
 
-    /// <summary>Releases all keys, for example after host focus is lost.</summary>
+    /// <summary>Releases all host keys, for example after host focus is lost. An automatic BREAK stays down.</summary>
     public void ReleaseAll() => Matrix.Clear();
+
+    /// <summary>Holds or releases BREAK independently of the host keys.</summary>
+    public void SetAutomaticBreak(bool pressed) => Automatic.SetKeyState(Break.Row, Break.Column, pressed);
 }

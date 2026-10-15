@@ -64,16 +64,23 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public string CpuTypeName => _cpuType == CpuType.ZilogZ80 ? "Z80" : "8080";
     public EmulatedMachine ActiveMachine { get; private set; } = EmulatedMachine.Cpm;
     public bool IsCp500 => ActiveMachine == EmulatedMachine.Cp500;
-    public bool IsCp500Available => _cp500Rom is { Length: > 0 };
+    public bool IsCp500Available => _cp500Rom != null && Cp500Characters != null;
+
+    /// <summary>The character generator the CP-500 display is drawn with, or null when CP-500 is unavailable.</summary>
+    public Cp500CharacterGenerator? Cp500Characters { get; }
     public int Cp500InstalledDrives => Cp500MachineProfile.Original.InstalledDrives;
     public Cp500VideoDevice? Cp500Video => _cp500Machine?.Video;
     public Cp500KeyboardDevice? Cp500Keyboard => _cp500Machine?.Keyboard;
     public event Action? ActiveMachineChanged;
 
-    public MainViewModel(IDiskImageProvider diskProvider, byte[]? cp500Rom = null)
+    /// <summary>CP-500 needs both user-supplied images: the 16 KiB system ROM and the 2 KiB character generator.</summary>
+    public MainViewModel(IDiskImageProvider diskProvider, byte[]? cp500Rom = null, byte[]? cp500CharacterRom = null)
     {
         _diskProvider = diskProvider;
         _cp500Rom = cp500Rom is { Length: > 0 } ? (byte[])cp500Rom.Clone() : null;
+        Cp500Characters = cp500CharacterRom is { Length: Cp500CharacterGenerator.ImageSize }
+            ? new Cp500CharacterGenerator(cp500CharacterRom)
+            : null;
 
         // Initialize emulator with Z80 by default
         _emulator = new Emulator(_cpuType);
@@ -212,7 +219,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             await StopCp500Async();
             _cp500Machine!.Keyboard.ReleaseAll();
-            _cp500Machine.Reset();
+            ResetCp500Machine();
             StartCp500();
             StatusText = "CP-500 reset";
             return;
@@ -301,14 +308,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         if (machine == EmulatedMachine.Cp500)
         {
-            if (_cp500Rom is not { Length: > 0 })
+            if (!IsCp500Available)
                 throw new InvalidOperationException(
-                    "CP-500 ROM not found. Supply cp500/cp500.rom and restart the app.");
+                    "CP-500 ROMs not found. Supply cp500/cp500.rom (16 KiB system ROM) and "
+                    + "cp500/cp500-chargen.rom (2 KiB character generator) and restart the app.");
 
             await _emulator.StopAsync();
             StopInterruptTimer();
-            _cp500Machine ??= new Cp500Machine(Cp500MachineProfile.Original, _cp500Rom, _cp500Drives.Images);
-            _cp500Machine.Reset();
+            _cp500Machine ??= new Cp500Machine(Cp500MachineProfile.Original, _cp500Rom!, _cp500Drives.Images);
+            ResetCp500Machine();
             ActiveMachine = machine;
             ActiveMachineChanged?.Invoke();
             StartCp500();
@@ -322,6 +330,15 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ActiveMachine = machine;
         ActiveMachineChanged?.Invoke();
         await Reset();
+    }
+
+    /// <summary>With an empty drive 0 the ROM only waits for a disk; holding BREAK through reset makes it offer BASIC.</summary>
+    private void ResetCp500Machine()
+    {
+        if (_cp500Drives.Images.IsMounted(0))
+            _cp500Machine!.Reset();
+        else
+            _cp500Machine!.ResetHoldingBreak();
     }
 
     private void StartCp500()

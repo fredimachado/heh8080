@@ -14,7 +14,7 @@ public sealed class MainViewModelCp500DiskTests : IDisposable
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(10);
 
     private readonly List<byte[]> _saved = [];
-    private readonly MainViewModel _viewModel = new(new FileDiskImageProvider(), SectorWriterRom());
+    private readonly MainViewModel _viewModel = new(new FileDiskImageProvider(), SectorWriterRom(), new byte[Cp500CharacterGenerator.ImageSize]);
 
     public void Dispose() => _viewModel.Dispose();
 

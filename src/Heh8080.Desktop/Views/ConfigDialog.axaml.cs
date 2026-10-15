@@ -185,7 +185,7 @@ public partial class ConfigDialog : Window
         {
             await _viewModel.SwitchMachine(profile);
             StatusLabel.Text = profile == EmulatedMachine.Cp500
-                ? "CP-500: cp500/cp500.rom"
+                ? "CP-500 running"
                 : "CP/M profile running";
         }
         catch (Exception ex)

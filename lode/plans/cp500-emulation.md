@@ -7,8 +7,8 @@ hardware compatibility with CP-500-specific keyboard/ROM details layered on top.
 Status: **desktop CP-500 is complete for ROM bring-up, keyboard, video, timed
 WD1791 with WAIT, JV3/DMK/raw disk images and desktop disk mounting with
 write-back**. Open work: browser disk persistence, a bootable DOS acceptance
-run (TRS-DOS 1.3 / DOS-500 images are not in the repo), CP500-2 glyph rendering
-and cassette (out of scope). The compatibility sequence is in
+run (TRS-DOS 1.3 / DOS-500 images are not in the repo) and cassette (out of
+scope). The compatibility sequence is in
 [cp500-compatibility-remediation.md](cp500-compatibility-remediation.md).
 
 ## Why this was feasible
@@ -49,8 +49,9 @@ M80 would need a switchable ROM region (`IRemappableMemoryRegion` exists).
     BASIC keyword and error tables, and a built-in monitor ("MONITOR VERSAO 1.1
     1982") hidden behind the A11 flip-flop, useful for bring-up debugging.
   - Boot flow with and without disks: [../cp500/summary.md](../cp500/summary.md).
-- `CP500-2.BIN` - 2 KB character generator (256 glyphs, 8x8). Not used yet: the
-  desktop renders `@`-based text codes and 2x3 semigraphics with its own font.
+- `cp500-chargen.rom` - 2 KB character generator (256 glyphs, 8x8), required
+  next to `cp500.rom`. The desktop rasterizes CP-500 text from it
+  (`Cp500CharacterGenerator`, `Cp500Raster`).
 
 ## Phases
 
@@ -63,9 +64,10 @@ M80 would need a switchable ROM region (`IRemappableMemoryRegion` exists).
 - `CycleThrottle` returns an asynchronous host delay; it never blocks UI/WASM.
 
 ### Phase 3 - Video display - done
-- `Cp500VideoDevice` exposes the 64x16 plane; `RetroTerminalControl` shows it
-  with the existing CRT shader and housing. 32-column mode is supported.
-- Optional: exact CP500-2 glyphs (user supplied).
+- `Cp500VideoDevice` exposes the 64x16 plane; `Cp500Raster` draws it with the
+  real character generator into a 512x192 frame, and `RetroTerminalControl`
+  shows it with the existing CRT shader and housing. 32-column mode and the
+  alternate character set are supported.
 
 ### Phase 4 - Keyboard - done
 - Held-key matrix input with SHIFT handling; focus loss releases all keys.
@@ -92,7 +94,9 @@ M80 would need a switchable ROM region (`IRemappableMemoryRegion` exists).
 - Unit tests per device in `tests/Heh8080.Tests` (`Cp500*`, `Wd1791*`, `ModelIII*`).
 - Real-ROM tests (`[RealRomFact]`, skipped without `cp500/cp500.rom`) drive the
   actual firmware through `RealRomSession`: empty-drive `Diskette?`, boot sector
-  execution, BASIC without drives, and a key-echo sweep.
+  execution, BASIC without drives, BASIC with empty drives via
+  `ResetHoldingBreak`, a key-echo sweep, and the boot banner rasterized with
+  the real character ROM (`[RealCharacterGeneratorFact]`, needs both ROMs).
 - A view-model test with a tiny ROM covers mount, pause/resume and write-back.
 - Keep the CP/M tests green.
 - Open: real-software acceptance (TRS-DOS 1.3, one game).
@@ -101,7 +105,8 @@ M80 would need a switchable ROM region (`IRemappableMemoryRegion` exists).
 
 1. Desktop targets the original 1982 48 KiB CP-500 at 2.03 MHz with two drives.
 2. CP/M remains the default and can be selected again at runtime.
-3. ROMs remain user supplied; `cp500.rom` is loaded from `cp500/`.
+3. ROMs remain user supplied; `cp500.rom` and `cp500-chargen.rom` are
+   loaded from `cp500/` and both are required.
 4. Cassette is out of scope; disk and ROM bring-up has priority.
 
 ## Legal note

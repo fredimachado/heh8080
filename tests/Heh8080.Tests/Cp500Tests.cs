@@ -59,6 +59,90 @@ public sealed class Cp500MachineTests
     }
 
     [RealRomFact]
+    public void RealRomWithEmptyDrivesResetHoldingBreakReachesBasic()
+    {
+        var session = new RealRomSession();
+        Assert.True(session.RunUntilScreenContains("Diskette?", maxSeconds: 5));
+
+        session.Machine.ResetHoldingBreak();
+
+        Assert.True(session.RunUntilScreenContains("BASIC (S ou N)", maxSeconds: 10));
+        Assert.DoesNotContain("Diskette?", session.Screen());
+
+        session.Type("S\r\r");
+        session.Run(seconds: 3);
+        session.Type("PRINT 22\r");
+        session.Run(seconds: 1);
+        string basic = session.Screen();
+
+        Assert.Contains("READY", basic);
+        Assert.Contains("\n 22", "\n" + basic);
+    }
+
+    [Fact]
+    public void ResetHoldingBreakHoldsBreakForOneSecondOfEmulatedTimeThenReleasesIt()
+    {
+        var machine = SpinningMachine();
+
+        machine.ResetHoldingBreak();
+
+        Assert.True(BreakIsDown(machine));
+        RunCycles(machine, machine.Profile.ClockHz - 100);
+        Assert.True(BreakIsDown(machine));
+        RunCycles(machine, 200);
+        Assert.False(BreakIsDown(machine));
+    }
+
+    [Fact]
+    public void PlainResetCancelsTheBreakHold()
+    {
+        var machine = SpinningMachine();
+        machine.ResetHoldingBreak();
+
+        machine.Reset();
+
+        Assert.False(BreakIsDown(machine));
+    }
+
+    [Fact]
+    public void TheBreakHoldNeitherClobbersNorIsReleasedByHostKeys()
+    {
+        var machine = SpinningMachine();
+        var host = new Cp500HostKeyboard(machine.Keyboard);
+        Cp500KeyStroke escape = Cp500KeyMap.Map(Cp500HostKey.Escape);
+
+        machine.ResetHoldingBreak();
+        host.KeyDown(1, escape);
+        host.KeyUp(1);
+        host.ReleaseAll();
+        machine.Keyboard.ReleaseAll();
+        Assert.True(BreakIsDown(machine));
+
+        host.KeyDown(1, escape);
+        RunCycles(machine, machine.Profile.ClockHz + 100);
+        Assert.True(BreakIsDown(machine));
+
+        host.KeyUp(1);
+        Assert.False(BreakIsDown(machine));
+    }
+
+    private static Cp500Machine SpinningMachine()
+    {
+        byte[] rom = new byte[Cp500MachineProfile.SystemRomSizeBytes];
+        rom[0] = 0x18;
+        rom[1] = 0xFE; // JR $
+        return new Cp500Machine(Cp500MachineProfile.Original, rom);
+    }
+
+    private static void RunCycles(Cp500Machine machine, long cycles)
+    {
+        for (long executed = 0; executed < cycles;)
+            executed += machine.Step();
+    }
+
+    private static bool BreakIsDown(Cp500Machine machine) => (machine.Memory.Read(0x3840) & 0x04) != 0;
+
+    [RealRomFact]
     public void RealRomWithoutDiskDrivesBootsToBasicAndRunsAStatement()
     {
         var session = new RealRomSession(profile: new Cp500MachineProfile(installedDrives: 0));

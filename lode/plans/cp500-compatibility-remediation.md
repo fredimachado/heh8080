@@ -81,15 +81,16 @@ DOS-500 image is still to be run, see follow-ups.
 
 ### 5. Model III video-control modes - done
 
-- `ECh` selects 32/64-column mode, the alternate character set and inverse
-  fallback rendering in `Cp500VideoDevice`; mode changes never mutate VRAM.
+- `ECh` selects 32/64-column mode and the alternate character set in
+  `Cp500VideoDevice`; `Cp500Raster` draws them with the real character
+  generator. Mode changes never mutate VRAM.
 
 ## Follow-ups
 
 - Browser disk mounting and IndexedDB persistence for CP-500 (the view model
   already takes bytes plus a write-back delegate, so Browser only needs storage).
 - Boot a real TRS-DOS 1.3 / DOS-500 image to `DOS READY` (user-supplied media).
-- CP500-2 glyph rendering, an ABNT layout, and the M80/Turbo revisions.
+- An ABNT layout, and the M80/Turbo revisions.
 
 Related: [cp500-emulation.md](cp500-emulation.md),
 [../cp500/summary.md](../cp500/summary.md),

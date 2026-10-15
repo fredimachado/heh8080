@@ -73,6 +73,7 @@ graph TB
 | `MainViewModel.cs` | Device wiring, auto-boot, commands |
 | `MainView.axaml.cs` | Terminal wiring, config dialog trigger |
 | `RetroTerminalControl.cs` | CRT shader, FJM-3A logo button |
+| `Cp500ScreenPainter.cs` | Draws the CP-500 512x192 raster (character generator output) into the CRT content, see [../cp500/desktop-integration.md](../cp500/desktop-integration.md) |
 | `ConfigDialog.axaml` | Disk mount/unmount, reset |
 
 ## Threading Model

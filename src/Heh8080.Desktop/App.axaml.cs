@@ -27,7 +27,8 @@ public partial class App : Application
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             var diskProvider = new FileDiskImageProvider();
-            _viewModel = new MainViewModel(diskProvider, LoadCp500Rom());
+            _viewModel = new MainViewModel(
+                diskProvider, LoadCp500File("cp500.rom"), LoadCp500File("cp500-chargen.rom"));
 
             desktop.MainWindow = new MainWindow
             {
@@ -103,16 +104,16 @@ public partial class App : Application
         }
     }
 
-    private static byte[]? LoadCp500Rom()
+    private static byte[]? LoadCp500File(string fileName)
     {
         string[] candidates =
         {
-            Path.Combine(AppContext.BaseDirectory, "cp500", "cp500.rom"),
-            Path.Combine(Environment.CurrentDirectory, "cp500", "cp500.rom"),
+            Path.Combine(AppContext.BaseDirectory, "cp500", fileName),
+            Path.Combine(Environment.CurrentDirectory, "cp500", fileName),
             Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 "heh8080",
-                "cp500.rom")
+                fileName)
         };
 
         string? path = candidates.FirstOrDefault(File.Exists);

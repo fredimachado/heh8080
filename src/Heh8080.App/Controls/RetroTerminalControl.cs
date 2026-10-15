@@ -23,6 +23,8 @@ public class RetroTerminalControl : Control
 {
     private Adm3aTerminal? _terminal;
     private Cp500VideoDevice? _cp500Video;
+    private Cp500CharacterGenerator? _cp500Characters;
+    private byte[]? _cp500Frame;
     private Cp500KeyboardDevice? _cp500KeyboardDevice;
     private Cp500HostKeyboard? _cp500Keyboard;
     private int _cp500RedrawPending;
@@ -42,6 +44,10 @@ public class RetroTerminalControl : Control
     private const double BaseLogoWidth = 80;
     private const double BaseLogoHeight = 24;
     private const double BaseLogoMargin = 8;
+
+    // The 512x192 CP-500 raster fills a 4:3 tube, so a pixel is twice as tall as it is wide: 512x384 logical pixels.
+    internal const double BaseCp500PixelWidth = 2;
+    private const double Cp500PixelAspect = 2;
 
     // Scaled dimensions (computed from Scale property)
     private double _bezelSize;
@@ -176,10 +182,24 @@ public class RetroTerminalControl : Control
                 _cp500Video.ControlChanged += OnCp500ControlChanged;
             }
 
+            RefreshCp500Frame();
             MeasureCharacterSize();
             InvalidateVisual();
         }
     }
+
+    /// <summary>The character generator CP-500 text is drawn with. Set it before <see cref="Cp500Video"/>.</summary>
+    public Cp500CharacterGenerator? Cp500Characters
+    {
+        get => _cp500Characters;
+        set
+        {
+            _cp500Characters = value;
+            RefreshCp500Frame();
+        }
+    }
+
+    private bool IsCp500 => _cp500Video != null && _cp500Characters != null;
 
     public Cp500KeyboardDevice? Cp500Keyboard
     {
@@ -255,7 +275,25 @@ public class RetroTerminalControl : Control
     private void RedrawCp500()
     {
         Volatile.Write(ref _cp500RedrawPending, 0);
+        RefreshCp500Frame();
         InvalidateVisual();
+    }
+
+    /// <summary>
+    /// Rasterizes the video state on the UI thread into a fresh array that the render thread may keep using
+    /// while the emulation thread goes on writing video RAM.
+    /// </summary>
+    private void RefreshCp500Frame()
+    {
+        if (!IsCp500)
+        {
+            _cp500Frame = null;
+            return;
+        }
+
+        byte[] frame = new byte[Cp500Raster.Width * Cp500Raster.Height];
+        _cp500Video!.Render(_cp500Characters!, frame);
+        _cp500Frame = frame;
     }
 
     protected override void OnAttachedToVisualTree(VisualTreeAttachmentEventArgs e)
@@ -292,20 +330,22 @@ public class RetroTerminalControl : Control
         _charHeight = metrics.Descent - metrics.Ascent;
         _hasMeasured = true;
 
-        // Set preferred size based on 80x24 grid with 4:3 screen aspect ratio
-        int columns = _cp500Video == null ? TerminalBuffer.Width : Cp500VideoDevice.Columns;
-        int rows = _cp500Video == null ? TerminalBuffer.Height : Cp500VideoDevice.Rows;
-        var terminalWidth = _charWidth * columns;
-        var terminalHeight = _charHeight * rows;
-
-        // Screen width is terminal + horizontal padding (using scaled values)
-        var screenWidth = terminalWidth + (_screenPaddingHorizontal * 2);
-        // Screen height is calculated for 4:3 aspect ratio
-        var screenHeight = screenWidth * 3.0 / 4.0;
-
-        Width = screenWidth + (_bezelSize * 2);
-        Height = screenHeight + (_bezelSize * 2);
+        var screenSize = GetScreenSize();
+        Width = screenSize.Width + (_bezelSize * 2);
+        Height = screenSize.Height + (_bezelSize * 2);
     }
+
+    /// <summary>The 4:3 tube: the text area plus scaled horizontal padding, with the height following the aspect ratio.</summary>
+    private Size GetScreenSize()
+    {
+        double contentWidth = IsCp500 ? GetCp500ContentSize().Width : _charWidth * TerminalBuffer.Width;
+        double screenWidth = contentWidth + (_screenPaddingHorizontal * 2);
+        return new Size(screenWidth, screenWidth * 3.0 / 4.0);
+    }
+
+    private Size GetCp500ContentSize() => new(
+        Cp500Raster.Width * BaseCp500PixelWidth * Scale,
+        Cp500Raster.Height * BaseCp500PixelWidth * Cp500PixelAspect * Scale);
 
     public override void Render(DrawingContext context)
     {
@@ -313,13 +353,9 @@ public class RetroTerminalControl : Control
             MeasureCharacterSize();
 
         var bounds = new Rect(Bounds.Size);
-        int columns = _cp500Video == null ? TerminalBuffer.Width : Cp500VideoDevice.Columns;
-        int rows = _cp500Video == null ? TerminalBuffer.Height : Cp500VideoDevice.Rows;
-        var terminalWidth = _charWidth * columns;
-        var terminalHeight = _charHeight * rows;
-        // Screen area with 4:3 aspect ratio (using scaled padding)
-        var screenWidth = terminalWidth + (_screenPaddingHorizontal * 2);
-        var screenHeight = screenWidth * 3.0 / 4.0;
+        var screenSize = GetScreenSize();
+        var screenWidth = screenSize.Width;
+        var screenHeight = screenSize.Height;
         var screenRect = new Rect(_bezelSize, _bezelSize, screenWidth, screenHeight);
 
         // Draw FJM-3A style housing with shading (rounded corners)
@@ -444,7 +480,7 @@ public class RetroTerminalControl : Control
 
         // Use custom draw operation for CRT effect (includes edge shadow in shader)
         var operation = new TerminalDrawOperation(
-            screenRect, _terminal, _cp500Video, _typeface, (float)FontSize,
+            screenRect, _terminal, IsCp500 ? _cp500Frame : null, GetCp500ContentSize(), _typeface, (float)FontSize,
             (float)_charWidth, (float)_charHeight, _screenCornerRadius);
 
         context.Custom(operation);
@@ -473,7 +509,7 @@ public class RetroTerminalControl : Control
         // Logo text
         var logoFontSize = 12 * Scale;
         var logoText = new FormattedText(
-            _cp500Video == null ? "FJM-3A" : "CP-500",
+            IsCp500 ? "CP-500" : "FJM-3A",
             System.Globalization.CultureInfo.CurrentCulture,
             FlowDirection.LeftToRight,
             new Typeface(FontFamily, FontStyle.Normal, FontWeight.Bold),
@@ -727,22 +763,28 @@ internal class TerminalDrawOperation : ICustomDrawOperation
     private static SKRuntimeEffect? _crtEffect;
     private static bool _shaderFailed;
 
+    private const float Cp500GlowOffset = 1.5f;
+
     private readonly Rect _bounds;
     private readonly Adm3aTerminal? _terminal;
-    private readonly Cp500VideoDevice? _cp500Video;
+    private readonly byte[]? _cp500Frame;
+    private readonly Size _cp500ContentSize;
     private readonly SKTypeface? _typeface;
     private readonly float _fontSize;
     private readonly float _charWidth;
     private readonly float _charHeight;
     private readonly float _cornerRadius;
 
-    private const int HalfwidthKatakanaStart = 0xFF61;
-
     // CRT shader with barrel distortion, scanlines, bloom, vignette, edge shadow
     private const string CrtShaderSource = @"
 uniform shader content;
 uniform float2 resolution;
 uniform float2 offset;
+uniform float scanlinePeriod;
+uniform float scanlineOrigin;
+uniform float scanlineFollowsContent;
+uniform float contentTexel;
+uniform float bloomScale;
 
 half4 main(float2 fragCoord) {
     float2 uv = (fragCoord - offset) / resolution;
@@ -769,22 +811,38 @@ half4 main(float2 fragCoord) {
 
     // Sample main color
     float2 texel = 1.0 / resolution;
-    half4 color = sample(content, distortedUv * resolution);
+    // Nearest sampling for the CP/M picture. A CP-500 picture is sampled bilinearly (contentTexel is one texel in
+    // the shader's coordinates) so the barrel distortion never skips or doubles a column of its pixels.
+    float2 contentPos = distortedUv * resolution;
+    half4 color;
+    if (contentTexel <= 0.0) {
+        color = sample(content, contentPos);
+    } else {
+        float2 q = contentPos / contentTexel - 0.5;
+        float2 base = floor(q);
+        half2 f = half2(q - base);
+        half4 a = sample(content, (base + float2(0.5, 0.5)) * contentTexel);
+        half4 b = sample(content, (base + float2(1.5, 0.5)) * contentTexel);
+        half4 c = sample(content, (base + float2(0.5, 1.5)) * contentTexel);
+        half4 d = sample(content, (base + float2(1.5, 1.5)) * contentTexel);
+        color = mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+    }
 
     // Simple 8-tap bloom
-    half4 bloom = sample(content, (distortedUv + float2(-2.0, 0.0) * texel) * resolution);
-    bloom += sample(content, (distortedUv + float2(2.0, 0.0) * texel) * resolution);
-    bloom += sample(content, (distortedUv + float2(0.0, -2.0) * texel) * resolution);
-    bloom += sample(content, (distortedUv + float2(0.0, 2.0) * texel) * resolution);
-    bloom += sample(content, (distortedUv + float2(-1.5, -1.5) * texel) * resolution);
-    bloom += sample(content, (distortedUv + float2(1.5, -1.5) * texel) * resolution);
-    bloom += sample(content, (distortedUv + float2(-1.5, 1.5) * texel) * resolution);
-    bloom += sample(content, (distortedUv + float2(1.5, 1.5) * texel) * resolution);
+    half4 bloom = sample(content, (distortedUv + float2(-2.0, 0.0) * texel * bloomScale) * resolution);
+    bloom += sample(content, (distortedUv + float2(2.0, 0.0) * texel * bloomScale) * resolution);
+    bloom += sample(content, (distortedUv + float2(0.0, -2.0) * texel * bloomScale) * resolution);
+    bloom += sample(content, (distortedUv + float2(0.0, 2.0) * texel * bloomScale) * resolution);
+    bloom += sample(content, (distortedUv + float2(-1.5, -1.5) * texel * bloomScale) * resolution);
+    bloom += sample(content, (distortedUv + float2(1.5, -1.5) * texel * bloomScale) * resolution);
+    bloom += sample(content, (distortedUv + float2(-1.5, 1.5) * texel * bloomScale) * resolution);
+    bloom += sample(content, (distortedUv + float2(1.5, 1.5) * texel * bloomScale) * resolution);
     bloom *= 0.125;
     color.rgb += bloom.rgb * 0.5;
 
     // Prominent scanlines
-    float scanlinePos = fract(fragCoord.y / 3.0);
+    float scanlineY = mix(fragCoord.y, offset.y + distortedUv.y * resolution.y, scanlineFollowsContent);
+    float scanlinePos = fract((scanlineY - scanlineOrigin) / scanlinePeriod);
     float scanline = scanlinePos >= 0.5 ? 1.0 : 0.0;
     color.rgb *= 0.7 + 0.3 * scanline;
 
@@ -808,12 +866,13 @@ half4 main(float2 fragCoord) {
 }
 ";
 
-    public TerminalDrawOperation(Rect bounds, Adm3aTerminal? terminal, Cp500VideoDevice? cp500Video,
+    public TerminalDrawOperation(Rect bounds, Adm3aTerminal? terminal, byte[]? cp500Frame, Size cp500ContentSize,
         SKTypeface? typeface, float fontSize, float charWidth, float charHeight, double cornerRadius)
     {
         _bounds = bounds;
         _terminal = terminal;
-        _cp500Video = cp500Video;
+        _cp500Frame = cp500Frame;
+        _cp500ContentSize = cp500ContentSize;
         _typeface = typeface;
         _fontSize = fontSize;
         _charWidth = charWidth;
@@ -837,8 +896,13 @@ half4 main(float2 fragCoord) {
         int width = (int)_bounds.Width;
         int height = (int)_bounds.Height;
 
+        // The CP-500 raster is drawn in device pixels so that every one of its pixels gets whole device pixels.
+        float pixelRatio = _cp500Frame == null ? 1f : Math.Max(1f, canvas.TotalMatrix.ScaleX);
+        int surfaceWidth = (int)MathF.Ceiling(width * pixelRatio);
+        int surfaceHeight = (int)MathF.Ceiling(height * pixelRatio);
+
         // Create offscreen surface for terminal content
-        using var surface = SKSurface.Create(new SKImageInfo(width, height));
+        using var surface = SKSurface.Create(new SKImageInfo(surfaceWidth, surfaceHeight));
         if (surface == null)
         {
             RenderTerminalDirect(canvas);
@@ -848,7 +912,7 @@ half4 main(float2 fragCoord) {
         var offscreen = surface.Canvas;
 
         // Render terminal to offscreen
-        RenderTerminalContent(offscreen, width, height);
+        RenderTerminalContent(offscreen, surfaceWidth, surfaceHeight, pixelRatio);
 
         // Get image from offscreen
         using var image = surface.Snapshot();
@@ -870,11 +934,18 @@ half4 main(float2 fragCoord) {
 
         if (_crtEffect != null)
         {
-            using var imageShader = image.ToShader();
+            var settings = GetCrtSettings(surfaceWidth, surfaceHeight, pixelRatio);
+            using var imageShader = image.ToShader(
+                SKShaderTileMode.Clamp, SKShaderTileMode.Clamp, SKMatrix.CreateScale(1f / pixelRatio, 1f / pixelRatio));
             var uniforms = new SKRuntimeEffectUniforms(_crtEffect)
             {
                 ["resolution"] = new[] { (float)width, (float)height },
-                ["offset"] = new[] { (float)_bounds.X, (float)_bounds.Y }
+                ["offset"] = new[] { (float)_bounds.X, (float)_bounds.Y },
+                ["scanlinePeriod"] = settings.ScanlinePeriod,
+                ["scanlineOrigin"] = settings.ScanlineOrigin,
+                ["scanlineFollowsContent"] = settings.ScanlinesFollowContent ? 1f : 0f,
+                ["contentTexel"] = settings.ContentTexel,
+                ["bloomScale"] = settings.BloomScale
             };
             var children = new SKRuntimeEffectChildren(_crtEffect)
             {
@@ -888,21 +959,21 @@ half4 main(float2 fragCoord) {
         }
         else
         {
-            canvas.DrawImage(image, (float)_bounds.X, (float)_bounds.Y);
+            canvas.DrawImage(image, SKRect.Create((float)_bounds.X, (float)_bounds.Y, width, height));
         }
     }
 
-    private void RenderTerminalContent(SKCanvas canvas, int width, int height)
+    private void RenderTerminalContent(SKCanvas canvas, int width, int height, float pixelRatio)
     {
         // Clear with background
         canvas.Clear(new SKColor(0x0A, 0x14, 0x0A));
 
-        if (_typeface == null) return;
-        if (_cp500Video != null)
+        if (_cp500Frame != null)
         {
-            RenderCp500Content(canvas, width, height);
+            PaintCp500Frame(canvas, width, height, pixelRatio);
             return;
         }
+        if (_typeface == null) return;
         if (_terminal == null) return;
 
         var buffer = _terminal.Buffer;
@@ -1003,115 +1074,52 @@ half4 main(float2 fragCoord) {
         }
     }
 
-    private void RenderCp500Content(SKCanvas canvas, int width, int height)
+
+    /// <summary>Centres the CP-500 picture on whole device pixels. Sizes are DIPs, the canvas is in device pixels.</summary>
+    private SKRect GetCp500ContentRect(int width, int height, float pixelRatio)
     {
-        var video = _cp500Video!;
-        int visibleColumns = video.VisibleColumns;
-        float cellWidth = _charWidth * Cp500VideoDevice.Columns / visibleColumns;
-        float offsetX = (width - _charWidth * Cp500VideoDevice.Columns) / 2;
-        float offsetY = (height - _charHeight * Cp500VideoDevice.Rows) / 2;
-
-        var cells = new Cp500RenderedCell[visibleColumns * Cp500VideoDevice.Rows];
-        for (int y = 0; y < Cp500VideoDevice.Rows; y++)
-        {
-            for (int x = 0; x < visibleColumns; x++)
-                cells[y * visibleColumns + x] = video.GetRenderedCell(x, y);
-        }
-
-        DrawCp500Blocks(canvas, cells, visibleColumns, cellWidth, offsetX, offsetY);
-        DrawCp500Text(canvas, cells, visibleColumns, cellWidth, offsetX, offsetY);
+        float contentWidth = MathF.Round((float)_cp500ContentSize.Width * pixelRatio);
+        float contentHeight = MathF.Round((float)_cp500ContentSize.Height * pixelRatio);
+        return SKRect.Create(
+            MathF.Round((width - contentWidth) / 2), MathF.Round((height - contentHeight) / 2), contentWidth, contentHeight);
     }
+
+    private void PaintCp500Frame(SKCanvas canvas, int width, int height, float pixelRatio) =>
+        Cp500ScreenPainter.Paint(
+            canvas, _cp500Frame!, GetCp500ContentRect(width, height, pixelRatio),
+            Cp500GlowOffset * Cp500EffectScale * pixelRatio);
+
+    /// <summary>Glow and bloom are tuned for a 2 DIP wide raster pixel, which is the CP-500 picture at 100%.</summary>
+    private float Cp500EffectScale => (float)(_cp500ContentSize.Width / Cp500Raster.Width / RetroTerminalControl.BaseCp500PixelWidth);
 
     /// <summary>
-    /// Draws 2x3 block graphics on pixel-snapped edges shared by neighbouring blocks and cells,
-    /// so they tile without gaps or overlap at every scale.
+    /// CP/M gets plain 3 DIP screen-space scanlines and nearest sampling. A CP-500 scanline is one raster line, so
+    /// the dark part follows the picture and every row of glyph pixels is shaded the same way; its effects shrink with
+    /// the picture so they never outgrow a pixel.
     /// </summary>
-    private void DrawCp500Blocks(
-        SKCanvas canvas, Cp500RenderedCell[] cells, int visibleColumns, float cellWidth, float offsetX, float offsetY)
+    private CrtSettings GetCrtSettings(int surfaceWidth, int surfaceHeight, float pixelRatio)
     {
-        using var paint = new SKPaint { Color = new SKColor(0x33, 0xFF, 0x33), Style = SKPaintStyle.Fill };
-        for (int row = 0; row < Cp500VideoDevice.Rows; row++)
-        {
-            for (int column = 0; column < visibleColumns; column++)
-            {
-                byte blocks = cells[row * visibleColumns + column].Blocks;
-                for (int bit = 0; bit < 6; bit++)
-                {
-                    if ((blocks & (1 << bit)) == 0)
-                        continue;
+        if (_cp500Frame == null)
+            return new CrtSettings(3f, 0f, false, 0f, 1f);
 
-                    float left = SnapToPixel(offsetX + (column + (bit & 1) * 0.5f) * cellWidth);
-                    float right = SnapToPixel(offsetX + (column + ((bit & 1) + 1) * 0.5f) * cellWidth);
-                    float top = SnapToPixel(offsetY + (row + (bit >> 1) / 3f) * _charHeight);
-                    float bottom = SnapToPixel(offsetY + (row + ((bit >> 1) + 1) / 3f) * _charHeight);
-                    canvas.DrawRect(new SKRect(left, top, right, bottom), paint);
-                }
-            }
-        }
+        SKRect content = GetCp500ContentRect(surfaceWidth, surfaceHeight, pixelRatio);
+        return new CrtSettings(
+            content.Height / pixelRatio / Cp500Raster.Height,
+            (float)_bounds.Y + content.Top / pixelRatio,
+            true,
+            1f / pixelRatio,
+            Cp500EffectScale);
     }
 
-    private void DrawCp500Text(
-        SKCanvas canvas, Cp500RenderedCell[] cells, int visibleColumns, float cellWidth, float offsetX, float offsetY)
-    {
-        using var font = new SKFont(_typeface, _fontSize);
-        bool hasKatakana = Array.Exists(cells, cell => cell.Glyph >= HalfwidthKatakanaStart);
-        using var katakanaTypeface = hasKatakana ? SKFontManager.Default.MatchCharacter(HalfwidthKatakanaStart) : null;
-        using var katakanaFont = new SKFont(katakanaTypeface ?? _typeface, _fontSize);
-        float baseline = -font.Metrics.Ascent;
+    private readonly record struct CrtSettings(
+        float ScanlinePeriod, float ScanlineOrigin, bool ScanlinesFollowContent, float ContentTexel, float BloomScale);
 
-        using var glowPaint = new SKPaint { Color = new SKColor(0x33, 0xFF, 0x33, 0x60), IsAntialias = true };
-        using var textPaint = new SKPaint { Color = new SKColor(0x33, 0xFF, 0x33), IsAntialias = true };
-
-        // Same glow as the CP/M renderer: dim copies at the four diagonal offsets, then the glyph itself.
-        (float X, float Y, SKPaint Paint)[] passes =
-        {
-            (-1.5f, -1.5f, glowPaint), (1.5f, -1.5f, glowPaint),
-            (-1.5f, 1.5f, glowPaint), (1.5f, 1.5f, glowPaint),
-            (0, 0, textPaint)
-        };
-        foreach (var (dx, dy, paint) in passes)
-        {
-            for (int row = 0; row < Cp500VideoDevice.Rows; row++)
-            {
-                for (int column = 0; column < visibleColumns; column++)
-                {
-                    var cell = cells[row * visibleColumns + column];
-                    if (cell.Graphics || cell.Glyph == ' ')
-                        continue;
-
-                    var cellFont = cell.Glyph >= HalfwidthKatakanaStart ? katakanaFont : font;
-                    DrawGlyph(
-                        canvas, cell.Glyph.ToString(),
-                        offsetX + column * cellWidth + dx, offsetY + row * _charHeight + baseline + dy,
-                        cell.DoubleWidth, cellFont, paint);
-                }
-            }
-        }
-    }
-
-    private static void DrawGlyph(
-        SKCanvas canvas, string text, float x, float baselineY, bool doubleWidth, SKFont font, SKPaint paint)
-    {
-        if (!doubleWidth)
-        {
-            canvas.DrawText(text, x, baselineY, font, paint);
-            return;
-        }
-
-        canvas.Save();
-        canvas.Translate(x, baselineY);
-        canvas.Scale(2, 1);
-        canvas.DrawText(text, 0, 0, font, paint);
-        canvas.Restore();
-    }
-
-    private static float SnapToPixel(float value) => MathF.Round(value);
     private void RenderTerminalDirect(SKCanvas canvas)
     {
         // Fallback: render directly without shader
         canvas.Save();
         canvas.Translate((float)_bounds.X, (float)_bounds.Y);
-        RenderTerminalContent(canvas, (int)_bounds.Width, (int)_bounds.Height);
+        RenderTerminalContent(canvas, (int)_bounds.Width, (int)_bounds.Height, 1f);
         canvas.Restore();
     }
 }
