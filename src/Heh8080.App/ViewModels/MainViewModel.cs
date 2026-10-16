@@ -71,6 +71,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public int Cp500InstalledDrives => Cp500MachineProfile.Original.InstalledDrives;
     public Cp500VideoDevice? Cp500Video => _cp500Machine?.Video;
     public Cp500KeyboardDevice? Cp500Keyboard => _cp500Machine?.Keyboard;
+
+    /// <summary>Multiple of real time the CP-500 runs at; <see cref="double.PositiveInfinity"/> is as fast as possible.</summary>
+    public double Cp500SpeedFactor { get; private set; } = 1;
     public event Action? ActiveMachineChanged;
 
     /// <summary>CP-500 needs both user-supplied images: the 16 KiB system ROM and the 2 KiB character generator.</summary>
@@ -316,6 +319,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             await _emulator.StopAsync();
             StopInterruptTimer();
             _cp500Machine ??= new Cp500Machine(Cp500MachineProfile.Original, _cp500Rom!, _cp500Drives.Images);
+            _cp500Machine.SpeedFactor = Cp500SpeedFactor;
             ResetCp500Machine();
             ActiveMachine = machine;
             ActiveMachineChanged?.Invoke();
@@ -429,6 +433,21 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         {
             StatusText = $"Could not insert {name}: {ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// Fast-forwards the whole CP-500 (CPU, timer and disk together) by <paramref name="factor"/>, or runs it as fast as
+    /// the host allows with <see cref="double.PositiveInfinity"/>. The speed is kept across resets and machine switches.
+    /// </summary>
+    public async Task SetCp500Speed(double factor)
+    {
+        if (!(factor > 0))
+            throw new ArgumentOutOfRangeException(nameof(factor), factor, "The speed factor must be positive.");
+
+        Cp500SpeedFactor = factor;
+        if (_cp500Machine != null)
+            await WithCp500Paused(() => _cp500Machine.SpeedFactor = factor);
+        StatusText = double.IsPositiveInfinity(factor) ? "CP-500 speed: maximum" : $"CP-500 speed: {factor}x";
     }
 
     private async Task WithCp500Paused(Action action)

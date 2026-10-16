@@ -13,6 +13,8 @@ public sealed class Cp500Machine
 
     private readonly CycleThrottle _throttle;
     private long _breakCyclesRemaining;
+    private double _speedFactor = 1;
+    private bool _pacedForTyping;
 
     /// <summary>Builds a CP-500 machine from a user-supplied ROM image and pluggable host devices.</summary>
     public Cp500Machine(
@@ -100,6 +102,24 @@ public sealed class Cp500Machine
     public TimeSpan LastSuggestedDelay { get; private set; }
 
     /// <summary>
+    /// Multiple of real time that <see cref="LastSuggestedDelay"/> paces the whole machine at, timer and disk
+    /// included, so software sees normal hardware. <see cref="double.PositiveInfinity"/> runs as fast as the host
+    /// allows. While a host key is held the machine runs at real time instead: software measures key holds in
+    /// emulated time, so a fast-forwarded keypress would last long enough to auto-repeat.
+    /// Survives <see cref="Reset"/>. Not thread safe: change it only while <see cref="Step"/> is not running.
+    /// </summary>
+    public double SpeedFactor
+    {
+        get => _speedFactor;
+        set
+        {
+            _throttle.SpeedFactor = value;
+            _speedFactor = value;
+            _pacedForTyping = false;
+        }
+    }
+
+    /// <summary>
     /// Executes one Z80 instruction, advances the cycle-driven hardware (disk controller and
     /// 30 Hz timer) by its duration, and calculates the host delay needed for real-time pacing.
     /// </summary>
@@ -111,8 +131,20 @@ public sealed class Cp500Machine
         Interrupts.AdvanceCycles(cycles);
         AdvanceBreakHold(cycles);
         Cpu.WaitLine = DiskControl.WaitActive;
+        if (_speedFactor != 1)
+            PaceTyping();
         LastSuggestedDelay = _throttle.GetDelay(cycles);
         return cycles;
+    }
+
+    private void PaceTyping()
+    {
+        bool typing = Keyboard.Matrix.AnyPressed;
+        if (typing == _pacedForTyping)
+            return;
+
+        _pacedForTyping = typing;
+        _throttle.SpeedFactor = typing ? 1 : _speedFactor;
     }
 
     /// <summary>Resets CPU-visible hardware without clearing RAM or user-supplied media.</summary>

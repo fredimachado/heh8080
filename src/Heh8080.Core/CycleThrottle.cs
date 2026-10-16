@@ -1,5 +1,3 @@
-using System.Diagnostics;
-
 namespace Heh8080.Core;
 
 /// <summary>
@@ -8,17 +6,37 @@ namespace Heh8080.Core;
 public sealed class CycleThrottle
 {
     private readonly long _cyclesPerSecond;
-    private readonly Stopwatch _clock = new();
+    private readonly TimeProvider _time;
+    private long _baseline;
     private long _emulatedCycles;
+    private double _speedFactor = 1;
 
-    /// <summary>Creates a throttle for a positive CPU frequency.</summary>
-    public CycleThrottle(long cyclesPerSecond)
+    /// <summary>Creates a throttle for a positive CPU frequency, timed by <paramref name="time"/> or the system clock.</summary>
+    public CycleThrottle(long cyclesPerSecond, TimeProvider? time = null)
     {
         if (cyclesPerSecond <= 0)
             throw new ArgumentOutOfRangeException(nameof(cyclesPerSecond));
 
         _cyclesPerSecond = cyclesPerSecond;
-        _clock.Start();
+        _time = time ?? TimeProvider.System;
+        _baseline = _time.GetTimestamp();
+    }
+
+    /// <summary>
+    /// Multiple of the configured frequency to pace at. <see cref="double.PositiveInfinity"/> never delays.
+    /// Setting it starts a fresh baseline, so time run at the previous speed is neither caught up nor waited out.
+    /// </summary>
+    public double SpeedFactor
+    {
+        get => _speedFactor;
+        set
+        {
+            if (!(value > 0))
+                throw new ArgumentOutOfRangeException(nameof(value), value, "The speed factor must be positive.");
+
+            _speedFactor = value;
+            Reset();
+        }
     }
 
     /// <summary>
@@ -31,8 +49,8 @@ public sealed class CycleThrottle
             throw new ArgumentOutOfRangeException(nameof(cycles));
 
         _emulatedCycles += cycles;
-        double targetSeconds = (double)_emulatedCycles / _cyclesPerSecond;
-        TimeSpan remaining = TimeSpan.FromSeconds(targetSeconds) - _clock.Elapsed;
+        double targetSeconds = _emulatedCycles / (_cyclesPerSecond * _speedFactor);
+        TimeSpan remaining = TimeSpan.FromSeconds(targetSeconds) - _time.GetElapsedTime(_baseline);
         return remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero;
     }
 
@@ -40,6 +58,6 @@ public sealed class CycleThrottle
     public void Reset()
     {
         _emulatedCycles = 0;
-        _clock.Restart();
+        _baseline = _time.GetTimestamp();
     }
 }

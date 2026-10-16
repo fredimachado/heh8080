@@ -1,3 +1,5 @@
+using System.Runtime.InteropServices;
+
 namespace Heh8080.Core;
 
 /// <summary>
@@ -271,6 +273,9 @@ public sealed class KeyboardMatrix
 
         return result;
     }
+
+    /// <summary>Whether any key in any row is pressed.</summary>
+    public bool AnyPressed => MemoryMarshal.Read<ulong>(_rows) != 0;
 
     /// <summary>Returns the active-high value of one row.</summary>
     public byte ReadRow(int row)

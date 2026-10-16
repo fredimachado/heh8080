@@ -72,6 +72,14 @@ graph TD
   pass without fetching, and sets `LastSuggestedDelay` for real-time pacing.
   It never sleeps or blocks a UI/WASM thread. Hardware time is derived only
   from executed cycles; the host owns no timer for it.
+- `SpeedFactor` fast-forwards by pacing `LastSuggestedDelay` at a multiple of
+  real time (`double.PositiveInfinity` never delays). The timer and disk scale
+  with the CPU, so software sees normal hardware that finishes sooner. While a
+  host key is held (`KeyboardMatrix.AnyPressed`, not the automatic BREAK) the
+  machine paces at 1x: the ROM measures key holds and repeat in emulated time,
+  so a fast-forwarded keypress auto-repeats. Each pace change restarts the
+  `CycleThrottle` baseline, so there is no catch-up burst or stall. The factor
+  survives `Reset`; change it only while `Step` is not running.
 - Disk media is supplied through `IModelIIIDiskImageProvider`. A host that
   mounts files uses `Cp500DriveBay`, which adds names and the write-back
   policy: [devices.md](devices.md).

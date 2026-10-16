@@ -17,6 +17,7 @@ public partial class ConfigDialog : Window
     private readonly TextBlock[] _driveLabels;
     private readonly Button[] _mountButtons;
     private readonly Button[] _ejectButtons;
+    private readonly (RadioButton Button, double Factor)[] _speeds;
     private MainViewModel? _viewModel;
 
     public ConfigDialog()
@@ -26,6 +27,7 @@ public partial class ConfigDialog : Window
         _driveLabels = [DriveALabel, DriveBLabel, DriveCLabel, DriveDLabel];
         _mountButtons = [MountA, MountB, MountC, MountD];
         _ejectButtons = [EjectA, EjectB, EjectC, EjectD];
+        _speeds = [(Speed1x, 1), (Speed2x, 2), (Speed4x, 4), (SpeedMax, double.PositiveInfinity)];
     }
 
     public void SetViewModel(MainViewModel viewModel)
@@ -44,7 +46,18 @@ public partial class ConfigDialog : Window
         CpuZ80.IsEnabled = !_viewModel.IsCp500;
         Cpu8080.IsEnabled = !_viewModel.IsCp500;
         ResetHint.Text = _viewModel.IsCp500 ? "Restart the CP-500 ROM" : "Warm boot from A:";
+        UpdateSpeedSelection();
         UpdateDriveLabels();
+    }
+
+    /// <summary>CP/M always runs as fast as it can, so the speed choice applies to the CP-500 only.</summary>
+    private void UpdateSpeedSelection()
+    {
+        foreach (var (button, factor) in _speeds)
+        {
+            button.IsChecked = factor.Equals(_viewModel!.Cp500SpeedFactor);
+            button.IsEnabled = _viewModel.IsCp500;
+        }
     }
 
     private void UpdateCpuSelection()
@@ -171,6 +184,19 @@ public partial class ConfigDialog : Window
         {
             await _viewModel.SwitchCpuType(newType);
             StatusLabel.Text = $"Switched to {_viewModel.CpuTypeName}";
+        }
+    }
+
+    private async void Speed_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel == null) return;
+
+        foreach (var (button, factor) in _speeds)
+        {
+            if (button != sender) continue;
+
+            await _viewModel.SetCp500Speed(factor);
+            StatusLabel.Text = _viewModel.StatusText;
         }
     }
 

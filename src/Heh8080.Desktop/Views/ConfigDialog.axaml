@@ -47,7 +47,7 @@
                        FontFamily="Consolas,monospace" FontSize="12"/>
 
             <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="40,*,70,70"
-                  Margin="8,0,0,0">
+                  RowSpacing="8" Margin="8,0,0,0">
                 <Grid.Styles>
                     <Style Selector="TextBlock">
                         <Setter Property="FontFamily" Value="Consolas,monospace"/>
@@ -70,29 +70,29 @@
                 <TextBlock Grid.Row="0" Grid.Column="0" x:Name="DriveAPrefix" Text="A:"/>
                 <TextBlock Grid.Row="0" Grid.Column="1" x:Name="DriveALabel" Text="(empty)"
                            Opacity="0.6" Margin="8,0" TextTrimming="CharacterEllipsis"/>
-                <Button Grid.Row="0" Grid.Column="2" x:Name="MountA" Content="Mount" Click="MountA_Click" Margin="2"/>
-                <Button Grid.Row="0" Grid.Column="3" x:Name="EjectA" Content="Eject" Click="UnmountA_Click" Margin="2"/>
+                <Button Grid.Row="0" Grid.Column="2" x:Name="MountA" Content="Mount" Click="MountA_Click" Margin="2,0"/>
+                <Button Grid.Row="0" Grid.Column="3" x:Name="EjectA" Content="Eject" Click="UnmountA_Click" Margin="2,0"/>
 
                 <!-- Drive B: -->
-                <TextBlock Grid.Row="1" Grid.Column="0" x:Name="DriveBPrefix" Text="B:" Margin="0,8,0,0"/>
+                <TextBlock Grid.Row="1" Grid.Column="0" x:Name="DriveBPrefix" Text="B:"/>
                 <TextBlock Grid.Row="1" Grid.Column="1" x:Name="DriveBLabel" Text="(empty)"
-                           Opacity="0.6" Margin="8,8,0,0" TextTrimming="CharacterEllipsis"/>
-                <Button Grid.Row="1" Grid.Column="2" x:Name="MountB" Content="Mount" Click="MountB_Click" Margin="2,8,2,0"/>
-                <Button Grid.Row="1" Grid.Column="3" x:Name="EjectB" Content="Eject" Click="UnmountB_Click" Margin="2,8,2,0"/>
+                           Opacity="0.6" Margin="8,0" TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Row="1" Grid.Column="2" x:Name="MountB" Content="Mount" Click="MountB_Click" Margin="2,0"/>
+                <Button Grid.Row="1" Grid.Column="3" x:Name="EjectB" Content="Eject" Click="UnmountB_Click" Margin="2,0"/>
 
                 <!-- Drive C: -->
-                <TextBlock Grid.Row="2" Grid.Column="0" x:Name="DriveCPrefix" Text="C:" Margin="0,8,0,0"/>
+                <TextBlock Grid.Row="2" Grid.Column="0" x:Name="DriveCPrefix" Text="C:"/>
                 <TextBlock Grid.Row="2" Grid.Column="1" x:Name="DriveCLabel" Text="(empty)"
-                           Opacity="0.6" Margin="8,8,0,0" TextTrimming="CharacterEllipsis"/>
-                <Button Grid.Row="2" Grid.Column="2" x:Name="MountC" Content="Mount" Click="MountC_Click" Margin="2,8,2,0"/>
-                <Button Grid.Row="2" Grid.Column="3" x:Name="EjectC" Content="Eject" Click="UnmountC_Click" Margin="2,8,2,0"/>
+                           Opacity="0.6" Margin="8,0" TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Row="2" Grid.Column="2" x:Name="MountC" Content="Mount" Click="MountC_Click" Margin="2,0"/>
+                <Button Grid.Row="2" Grid.Column="3" x:Name="EjectC" Content="Eject" Click="UnmountC_Click" Margin="2,0"/>
 
                 <!-- Drive D: -->
-                <TextBlock Grid.Row="3" Grid.Column="0" x:Name="DriveDPrefix" Text="D:" Margin="0,8,0,0"/>
+                <TextBlock Grid.Row="3" Grid.Column="0" x:Name="DriveDPrefix" Text="D:"/>
                 <TextBlock Grid.Row="3" Grid.Column="1" x:Name="DriveDLabel" Text="(empty)"
-                           Opacity="0.6" Margin="8,8,0,0" TextTrimming="CharacterEllipsis"/>
-                <Button Grid.Row="3" Grid.Column="2" x:Name="MountD" Content="Mount" Click="MountD_Click" Margin="2,8,2,0"/>
-                <Button Grid.Row="3" Grid.Column="3" x:Name="EjectD" Content="Eject" Click="UnmountD_Click" Margin="2,8,2,0"/>
+                           Opacity="0.6" Margin="8,0" TextTrimming="CharacterEllipsis"/>
+                <Button Grid.Row="3" Grid.Column="2" x:Name="MountD" Content="Mount" Click="MountD_Click" Margin="2,0"/>
+                <Button Grid.Row="3" Grid.Column="3" x:Name="EjectD" Content="Eject" Click="UnmountD_Click" Margin="2,0"/>
             </Grid>
 
             <Rectangle Height="1" Fill="#33FF33" Opacity="0.3" Margin="0,8,0,0"/>
@@ -101,7 +101,7 @@
             <TextBlock Text="SYSTEM" FontWeight="Bold" Foreground="#33FF33"
                        FontFamily="Consolas,monospace" FontSize="12"/>
 
-            <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="80,*" Margin="8,0,0,0">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="80,*" Margin="8,0,0,0">
                 <Grid.Styles>
                     <Style Selector="TextBlock">
                         <Setter Property="FontFamily" Value="Consolas,monospace"/>
@@ -117,7 +117,13 @@
                         <Setter Property="Fill" Value="#33FF33"/>
                         <Setter Property="Stroke" Value="#33FF33"/>
                     </Style>
-                    <Style Selector="RadioButton:checked:not(:disabled) /template/ Ellipse#CheckGlyph">
+                    <Style Selector="RadioButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                        <Setter Property="Foreground" Value="#33FF33"/>
+                    </Style>
+                    <Style Selector="RadioButton:pressed /template/ ContentPresenter#PART_ContentPresenter">
+                        <Setter Property="Foreground" Value="#33FF33"/>
+                    </Style>
+                    <Style Selector="RadioButton:checked /template/ Ellipse#CheckGlyph">
                         <Setter Property="Fill" Value="#0A140A"/>
                     </Style>
                 </Grid.Styles>
@@ -138,8 +144,20 @@
                                  Click="CpuType_Click"/>
                 </StackPanel>
 
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="Action:" Margin="0,8,0,0"/>
-                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Speed:" Margin="0,8,0,0"/>
+                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" Spacing="16" Margin="0,8,0,0">
+                    <RadioButton x:Name="Speed1x" Content="1x" GroupName="Speed"
+                                 IsChecked="True" Click="Speed_Click"/>
+                    <RadioButton x:Name="Speed2x" Content="2x" GroupName="Speed"
+                                 Click="Speed_Click"/>
+                    <RadioButton x:Name="Speed4x" Content="4x" GroupName="Speed"
+                                 Click="Speed_Click"/>
+                    <RadioButton x:Name="SpeedMax" Content="Max" GroupName="Speed"
+                                 Click="Speed_Click"/>
+                </StackPanel>
+
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Action:" Margin="0,8,0,0"/>
+                <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
                     <Button Content="Reset CPU" Click="Reset_Click"
                             Background="#1A2A1A" Foreground="#33FF33"
                             BorderBrush="#33FF33" BorderThickness="1"

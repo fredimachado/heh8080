@@ -71,6 +71,11 @@ flowchart LR
   returns 00h when no key in the selected rows is pressed.
 - CP-500 uses the original 48 KiB, 2.03 MHz profile with two installed drives.
   CPU selection remains a CP/M-only option.
+- `ConfigDialog` has a Speed row (1x, 2x, 4x, Max) enabled only for CP-500;
+  CP/M always runs unthrottled. It calls `MainViewModel.SetCp500Speed`, which
+  pauses the run loop to change `Cp500Machine.SpeedFactor` and keeps the choice
+  across resets and machine switches. Typing paces at 1x while a key is held
+  (see [summary.md](summary.md)).
 - The host never pauses the CPU at boot prompts. On CP-500 start and on every
   reset, `MainViewModel` calls `ResetHoldingBreak` when drive 0 has no disk,
   so the machine lands on `BASIC (S ou N)?` instead of looping on

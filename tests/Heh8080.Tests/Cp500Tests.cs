@@ -38,6 +38,19 @@ public sealed class MappedMemoryTests
         Assert.Equal(0x00, keyboard.Read(0x3804));
         Assert.Equal(0x00, keyboard.Read(0x3800));
     }
+
+    [Fact]
+    public void KeyboardMatrixReportsWhetherAnyKeyIsPressed()
+    {
+        var matrix = new KeyboardMatrix();
+        Assert.False(matrix.AnyPressed);
+
+        matrix.SetKeyState(7, 7, pressed: true);
+        Assert.True(matrix.AnyPressed);
+
+        matrix.SetKeyState(7, 7, pressed: false);
+        Assert.False(matrix.AnyPressed);
+    }
 }
 
 public sealed class Cp500MachineTests
@@ -124,6 +137,58 @@ public sealed class Cp500MachineTests
 
         host.KeyUp(1);
         Assert.False(BreakIsDown(machine));
+    }
+
+    [Fact]
+    public void SpeedFactorSurvivesReset()
+    {
+        var machine = SpinningMachine();
+
+        machine.SpeedFactor = 4;
+        machine.Reset();
+        machine.ResetHoldingBreak();
+
+        Assert.Equal(4, machine.SpeedFactor);
+    }
+
+    [Fact]
+    public void UnlimitedSpeedNeverSuggestsADelay()
+    {
+        var machine = SpinningMachine();
+        machine.SpeedFactor = double.PositiveInfinity;
+
+        RunCycles(machine, machine.Profile.ClockHz);
+
+        Assert.Equal(TimeSpan.Zero, machine.LastSuggestedDelay);
+    }
+
+    [Fact]
+    public void AHeldHostKeyPacesAFastForwardedMachineAtRealTimeUntilReleased()
+    {
+        var machine = SpinningMachine();
+        machine.SpeedFactor = double.PositiveInfinity;
+
+        machine.Keyboard.SetKeyState(1, 1, pressed: true);
+        RunCycles(machine, machine.Profile.ClockHz / 4);
+        Assert.True(machine.LastSuggestedDelay > TimeSpan.FromMilliseconds(100));
+
+        machine.Keyboard.SetKeyState(1, 1, pressed: false);
+        RunCycles(machine, machine.Profile.ClockHz);
+        Assert.Equal(TimeSpan.Zero, machine.LastSuggestedDelay);
+        Assert.Equal(double.PositiveInfinity, machine.SpeedFactor);
+    }
+
+    [Fact]
+    public void TheAutomaticBreakHoldDoesNotSlowFastForward()
+    {
+        var machine = SpinningMachine();
+        machine.SpeedFactor = double.PositiveInfinity;
+
+        machine.ResetHoldingBreak();
+        RunCycles(machine, machine.Profile.ClockHz / 4);
+
+        Assert.True(BreakIsDown(machine));
+        Assert.Equal(TimeSpan.Zero, machine.LastSuggestedDelay);
     }
 
     private static Cp500Machine SpinningMachine()
