@@ -147,6 +147,21 @@ owner and one write owner, and there are no alias ranges.
 
 | Ports | IN | OUT | Owner (IN / OUT) |
 |-------|----|-----|------------------|
+| C0 | Write protect. Bits 7-4 are drives 0-3. Bit 1 is set with the drive-0 bit when that image is protected. Bit 0 stays 0. Uninstalled, the port reads FFh. | Ignored. | `Cp500HardDiskController` |
+| C1 | Control byte last written. | Bit 4 resets the task file. Bits 3 and 2 are stored and do not gate commands. | `Cp500HardDiskController` |
+| C2 | Extra data. Clock bytes are read here. | Extra data. Set-time bytes are written here. | `Cp500HardDiskController` |
+| C3 | Extra size, low byte. A stored 0 means 256. Transfers stay 256 bytes. | Extra size. | `Cp500HardDiskController` |
+| C4 | FFh. No boot ROM is loaded. | Extra command, low nibble. `01h` reads the clock. `02h` sets it. | `Cp500HardDiskController` |
+| C5 | Extra error. | Boot-ROM address. Nothing reads it back. | `Cp500HardDiskController` |
+| C6-C7 | FFh. | Ignored. | `Cp500HardDiskController` |
+| C8 | Next byte of the sector buffer during a read. | Next byte of the sector buffer during a write. | `Cp500HardDiskController` |
+| C9 | Error register. ID not found is `10h`. Aborted command is `04h`. | Write precompensation. Stored and otherwise ignored. | `Cp500HardDiskController` |
+| CA | Sector count. | Sector count. One command still moves one sector. | `Cp500HardDiskController` |
+| CB | Sector number. Sector 0 is valid. | Sector number. | `Cp500HardDiskController` |
+| CC | Cylinder low. | Cylinder low. | `Cp500HardDiskController` |
+| CD | Cylinder high, bits 1-0. | Cylinder high. Only bits 1-0 are kept. | `Cp500HardDiskController` |
+| CE | Size, drive, and head packed as `essddhhh`, with ECC reading 0. | `essddhhh`. The write sets seek complete. | `Cp500HardDiskController` |
+| CF | Status. Busy `80h`, ready `40h`, write fault `20h`, seek complete `10h`, DRQ `08h`, corrected `04h`, command in progress `02h`, error `01h`. Busy is clear while DRQ is set. | Command. The high nibble selects it. | `Cp500HardDiskController` |
 | E0-E3 | `~(mask & (timer pending or live RS-232 flags))`, active low. The read clears nothing. | IRQ mask. Bit 2 is the 30 Hz timer. Bits 4, 5, and 6 are RS-232 transmit-empty, data-received, and receiver error when the board is installed. Bits 0, 1, and 3 are accepted and never asserted. | `Cp500InterruptDevice` |
 | E4-E7 | `~(nmiMask & nmiStatus)`; bit 7 mirrors the live FDC INTRQ line | NMI mask (bit 7 FDC INTRQ) | `Cp500InterruptDevice` |
 | E8 | Modem status. 1 is true: d7 CTS, d6 DSR, d5 carrier, d4 ring, d1 receiver line (idle mark is 1). d3, d2, and d0 read 0. Uninstalled, the port reads FFh. | Bit 1 is the UART control-load level. It does not reset the UART. | `Cp500Rs232Device` |
@@ -160,6 +175,15 @@ owner and one write owner, and there are no alias ranges.
 | FF | 00h, no side effects (no cassette attached) | Ignored | `Cp500CassettePort` |
 
 With the RS-232 board uninstalled, E8-EB stay unregistered and read FFh.
+With the hard disk uninstalled, C0-CF stay unregistered and read FFh.
+CF command nibbles are 1 restore, 2 read, 3 write, 4 verify, 5 format,
+6 init, 7 seek, and 9 test. Any other nibble aborts. A write with bit `04h`
+set aborts. A size code other than 00 (256 bytes) aborts a sector command.
+Format and init succeed and do not write the image. cp500-os reads the clock
+by writing `01h` to C4, polling CF until bit 7 clears, then reading six
+binary bytes from C2: seconds, minutes, hours, year since 2000, day, month.
+Year 12 is 2012. The bytes are not BCD. Command `02h` followed by six bytes
+written to C2 sets the clock.
 cp500-os must use the four ports as distinct registers, set E8 bit 1 before
 an EA control write, put transmit baud in the high E9 nibble and receive baud
 in the low nibble, treat EA as active high, enable E0 bits 4-6, and not read
