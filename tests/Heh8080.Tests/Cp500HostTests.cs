@@ -165,3 +165,146 @@ public sealed class Cp500SessionTests
 
     private static byte[] BlankDisk() => new byte[ModelIIIDiskGeometry.DiskSizeBytes];
 }
+
+public sealed class Cp500CommandTests
+{
+    [Fact]
+    public void ReadyWithinOneSecondExitsMatched()
+    {
+        using var dir = new TempRom();
+        Cp500Command.Batch batch = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse([
+            "--rom", dir.RomPath,
+            "--until-screen", "READY",
+            "--timeout", "1s",
+            "--dump-screen",
+        ]));
+
+        using Cp500Session session = Cp500Files.Load(batch.Files);
+        Cp500BatchResult result = batch.Run(session);
+
+        Assert.True(result.Matched);
+        Assert.Contains("READY", result.Screen);
+        Assert.Equal(Cp500Exit.Success, Cp500Exit.For(result));
+    }
+
+    [Fact]
+    public void AMissedSnippetExitsTimeoutAndStillShowsReady()
+    {
+        using var dir = new TempRom();
+        Cp500Command.Batch batch = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse([
+            "--rom", dir.RomPath,
+            "--until-screen", "NOPE",
+            "--timeout", "50ms",
+            "--dump-screen",
+        ]));
+
+        using Cp500Session session = Cp500Files.Load(batch.Files);
+        Cp500BatchResult result = batch.Run(session);
+
+        Assert.False(result.Matched);
+        Assert.Equal(Cp500Exit.Timeout, Cp500Exit.For(result));
+        Assert.Contains("READY", result.Screen);
+    }
+
+    [Fact]
+    public void Disk2InstallsThreeDrives()
+    {
+        using var dir = new TempRom();
+        string disk = Path.Combine(dir.Path, "disk2.dsk");
+        File.WriteAllBytes(disk, new byte[ModelIIIDiskGeometry.DiskSizeBytes]);
+        Cp500Command.Batch batch = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse([
+            "--rom", dir.RomPath,
+            "--disk2", disk,
+        ]));
+
+        using Cp500Session session = Cp500Files.Load(batch.Files);
+
+        Assert.Equal(3, session.InstalledDrives);
+        Assert.True(session.IsDriveMounted(2));
+        session.Poke(0xC000, [0xA5]);
+        Assert.Equal(new byte[] { 0xA5 }, session.Peek(0xC000, 1));
+    }
+
+    [Fact]
+    public void ADrivePastMaxDrivesIsRejected()
+    {
+        Cp500Rejected ex = Assert.Throws<Cp500Rejected>(() =>
+            Cp500Command.Parse(["--rom", "stub.rom", "--disk4", "disk.dsk"]));
+
+        Assert.Equal(
+            $"Drive {ModelIIIDiskGeometry.MaxDrives} is outside 0..{ModelIIIDiskGeometry.MaxDrives - 1}.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void UntilScreenWithoutTimeoutIsRejected()
+    {
+        Cp500Rejected ex = Assert.Throws<Cp500Rejected>(() =>
+            Cp500Command.Parse(["--rom", "stub.rom", "--until-screen", "READY"]));
+
+        Assert.Equal("--until-screen and --timeout must be passed together.", ex.Message);
+    }
+
+    [Fact]
+    public void McpCombinedWithTypeIsRejected()
+    {
+        Cp500Rejected ex = Assert.Throws<Cp500Rejected>(() =>
+            Cp500Command.Parse(["--mcp", "--rom", "stub.rom", "--type", "A"]));
+
+        Assert.Equal(
+            "--mcp cannot be combined with --type, --until-screen, --timeout, or --dump-screen.",
+            ex.Message);
+    }
+
+    [Fact]
+    public void AnUnmappedCharacterIsExit2AndDoesNotChangeTheScreen()
+    {
+        using var dir = new TempRom();
+        Cp500Command.Batch batch = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse([
+            "--rom", dir.RomPath,
+            "--type", "\\",
+            "--dump-screen",
+        ]));
+        using Cp500Session session = Cp500Files.Load(batch.Files);
+        string before = session.ReadScreen();
+
+        int code;
+        try
+        {
+            batch.Run(session);
+            code = Cp500Exit.For(new Cp500BatchResult(true, ""));
+        }
+        catch (Cp500Rejected)
+        {
+            code = Cp500Exit.Rejected;
+        }
+
+        Assert.Equal(before, session.ReadScreen());
+        Assert.Equal(2, code);
+    }
+
+    private sealed class TempRom : IDisposable
+    {
+        public TempRom()
+        {
+            Path = Directory.CreateTempSubdirectory("heh8080-cp500").FullName;
+            RomPath = System.IO.Path.Combine(Path, "stub.rom");
+            File.WriteAllBytes(RomPath, ReadyStub);
+        }
+
+        public string Path { get; }
+        public string RomPath { get; }
+
+        public void Dispose() => Directory.Delete(Path, recursive: true);
+
+        private static readonly byte[] ReadyStub =
+        [
+            0x21, 0x0D, 0x00,
+            0x11, 0x00, 0x3C,
+            0x01, 0x05, 0x00,
+            0xED, 0xB0,
+            0x18, 0xFE,
+            0x52, 0x45, 0x41, 0x44, 0x59,
+        ];
+    }
+}
