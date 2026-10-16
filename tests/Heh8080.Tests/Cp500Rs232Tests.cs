@@ -298,6 +298,36 @@ public sealed class Cp500Rs232Tests
     }
 
     [Fact]
+    public void ADriverPollsStatusAndReadsTheEchoedByte()
+    {
+        byte[] rom =
+        [
+            0x3E, 0xFF,             // LD A,FFh
+            0xD3, 0xE9,             // OUT (E9h),A          ; 19200 baud both ways
+            0xDB, 0xEA,             // IN A,(EAh)
+            0xCB, 0x77,             // BIT 6,A              ; TBMT
+            0x28, 0xFA,             // JR Z, tbmt
+            0x3E, 0x5A,             // LD A,5Ah
+            0xD3, 0xEB,             // OUT (EBh),A
+            0xDB, 0xEA,             // IN A,(EAh)
+            0xCB, 0x7F,             // BIT 7,A              ; DAV
+            0x28, 0xFA,             // JR Z, dav
+            0xDB, 0xEB,             // IN A,(EBh)
+            0x32, 0x00, 0x40,       // LD (4000h),A
+            0x18, 0xFE,             // JR $
+        ];
+        var endpoint = new EchoEndpoint();
+        var serial = new Rs232Attachment(true, endpoint);
+        var machine = new Cp500Machine(serial.Apply(Cp500MachineProfile.Original), rom, serial: serial);
+
+        long elapsed = 0;
+        while (machine.Memory.Read(0x4000) == 0 && elapsed < 100_000)
+            elapsed += machine.Step();
+
+        Assert.Equal(0x5A, machine.Memory.Read(0x4000));
+    }
+
+    [Fact]
     public void E0Bit4FollowsTransmitHoldingEmpty()
     {
         var machine = Machine(new Rs232Attachment(true, null), SampleClock);
@@ -330,6 +360,35 @@ public sealed class Cp500Rs232Tests
         long span = clockHz * 1000L;
         long step = (long)millibaud * 16L;
         return (samples * span + step - 1) / step;
+    }
+
+    private sealed class EchoEndpoint : ISerialEndpoint
+    {
+        private readonly Queue<byte> _incoming = new();
+
+        public ModemInputs Inputs => ModemInputs.Idle;
+
+        public bool TryRead(out byte value)
+        {
+            if (_incoming.Count == 0)
+            {
+                value = 0;
+                return false;
+            }
+
+            value = _incoming.Dequeue();
+            return true;
+        }
+
+        public void Write(byte value) => _incoming.Enqueue(value);
+
+        public void AdvanceCycles(long cycles)
+        {
+        }
+
+        public void Dispose()
+        {
+        }
     }
 
     private sealed class ScriptedEndpoint : ISerialEndpoint
