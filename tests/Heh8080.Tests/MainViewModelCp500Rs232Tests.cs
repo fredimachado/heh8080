@@ -54,6 +54,56 @@ public sealed class MainViewModelCp500Rs232Tests : IDisposable
         endpoint.Dispose();
     }
 
+    [Fact]
+    public async Task HardDiskRebuildKeepsRs232AndTheCableRebuildKeepsTheDisk()
+    {
+        using var viewModel = new MainViewModel(
+            new FileDiskImageProvider(),
+            PortsRom(),
+            new byte[Cp500CharacterGenerator.ImageSize]);
+        var endpoint = new TrackingEndpoint();
+        await viewModel.SwitchMachine(EmulatedMachine.Cp500);
+        WaitUntil(() => viewModel.Cp500Video!.ReadCharacter(1, 0) == 0xFF);
+
+        await viewModel.SetCp500Rs232(new Rs232Attachment(true, endpoint));
+        WaitUntil(() => viewModel.Cp500Video!.ReadCharacter(1, 0) == 0x02);
+        Assert.Equal(0xFF, viewModel.Cp500Video!.ReadCharacter(2, 0));
+
+        await viewModel.SetCp500HardDisk(true);
+        WaitUntil(() => viewModel.Cp500Video!.ReadCharacter(2, 0) == 0x40);
+        Assert.Equal(0x02, viewModel.Cp500Video!.ReadCharacter(1, 0));
+        Assert.False(endpoint.Disposed);
+        Assert.True(viewModel.Cp500HardDiskInstalled);
+
+        byte[] image = new byte[512];
+        image[0] = 0x56;
+        image[1] = 0xCB;
+        image[2] = 0x10;
+        image[26] = 1;
+        image[28] = 1;
+        image[29] = 1;
+        await viewModel.MountCp500HardDisk(new byte[8], "bad.hdv", null);
+        Assert.Null(viewModel.HardDiskName);
+        Assert.Contains("Could not insert", viewModel.StatusText);
+        await viewModel.MountCp500HardDisk(image, "disk.hdv", null);
+        Assert.Equal("disk.hdv", viewModel.HardDiskName);
+        Assert.Equal(0x02, viewModel.Cp500Video!.ReadCharacter(1, 0));
+
+        await viewModel.SetCp500Rs232(new Rs232Attachment(true, endpoint));
+        WaitUntil(() => viewModel.Cp500Video!.ReadCharacter(2, 0) == 0x40);
+        Assert.Equal(0x02, viewModel.Cp500Video!.ReadCharacter(1, 0));
+        Assert.False(endpoint.Disposed);
+        Assert.Equal("disk.hdv", viewModel.HardDiskName);
+
+        await viewModel.EjectCp500HardDisk();
+        Assert.Null(viewModel.HardDiskName);
+        await viewModel.SetCp500HardDisk(false);
+        WaitUntil(() => viewModel.Cp500Video!.ReadCharacter(2, 0) == 0xFF);
+        Assert.Equal(0x02, viewModel.Cp500Video!.ReadCharacter(1, 0));
+        Assert.False(viewModel.Cp500HardDiskInstalled);
+        Assert.False(endpoint.Disposed);
+    }
+
     private byte Cell(int column) => _viewModel.Cp500Video!.ReadCharacter(column, 0);
 
     private static void WaitUntil(Func<bool> condition)
@@ -66,6 +116,23 @@ public sealed class MainViewModelCp500Rs232Tests : IDisposable
         }
     }
 
+    private static byte[] PortsRom()
+    {
+        byte[] program =
+        [
+            0xFB,
+            0xDB, 0xE8,
+            0x32, 0x01, 0x3C,
+            0xDB, 0xCF,
+            0x32, 0x02, 0x3C,
+            0x18, 0xFE,
+        ];
+        byte[] rom = new byte[Cp500MachineProfile.SystemRomSizeBytes];
+        program.CopyTo(rom, 0);
+        StatusHandler().CopyTo(rom, 0x0038);
+        return rom;
+    }
+
     private static byte[] StatusRom()
     {
         byte[] program =
@@ -75,19 +142,20 @@ public sealed class MainViewModelCp500Rs232Tests : IDisposable
             0x32, 0x01, 0x3C,       // LD (3C01h),A
             0x18, 0xFE,             // JR $
         ];
-        byte[] handler =
-        [
-            0xDB, 0xEC,             // IN A,(ECh)
-            0x21, 0x00, 0x3C,       // LD HL,3C00h
-            0x34,                   // INC (HL)
-            0xFB,                   // EI
-            0xED, 0x4D,             // RETI
-        ];
         byte[] rom = new byte[Cp500MachineProfile.SystemRomSizeBytes];
         program.CopyTo(rom, 0);
-        handler.CopyTo(rom, 0x0038);
+        StatusHandler().CopyTo(rom, 0x0038);
         return rom;
     }
+
+    private static byte[] StatusHandler() =>
+    [
+        0xDB, 0xEC,
+        0x21, 0x00, 0x3C,
+        0x34,
+        0xFB,
+        0xED, 0x4D,
+    ];
 
     private sealed class TrackingEndpoint : ISerialEndpoint
     {

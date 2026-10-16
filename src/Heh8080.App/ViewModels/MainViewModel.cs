@@ -27,6 +27,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private readonly Cp500DriveBay _cp500Drives = new();
     private Cp500Machine? _cp500Machine;
     private ISerialEndpoint? _cp500Serial;
+    private OffsetClock? _cp500Clock;
     private CancellationTokenSource? _cp500Cancellation;
     private Task? _cp500RunTask;
 
@@ -403,6 +404,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    /// <summary>Name of the hard disk, or null when the slot is empty. This is not a floppy drive label.</summary>
+    public string? HardDiskName => IsCp500 ? _cp500Drives.HardDisk.Name : null;
+
+    /// <summary>FreHD board flag on the running CP-500. Stock and CP/M stay false.</summary>
+    public bool Cp500HardDiskInstalled => IsCp500 && _cp500Machine?.Profile.HardDiskInstalled == true;
+
     /// <summary>Name of the disk in a drive of the active machine, or null when the drive is empty.</summary>
     public string? GetDriveLabel(int drive) => IsCp500
         ? _cp500Drives.NameOf(drive)
@@ -453,10 +460,74 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     /// <summary>
     /// Replaces the CP-500 with a machine on the same disks, RAM, clock, and speed, cabled by <paramref name="rs232"/>.
-    /// The previous cable is released only after the new machine exists. A failed build leaves the running machine in place
-    /// and leaves <paramref name="rs232"/> with the caller.
+    /// The hard-disk board stays as it is. The previous cable is released only when the replacement endpoint is a
+    /// different object. A failed build leaves the running machine in place and leaves <paramref name="rs232"/> with the caller.
     /// </summary>
     public async Task SetCp500Rs232(Rs232Attachment rs232)
+    {
+        if (_cp500Machine == null || _cp500Rom == null)
+            throw new InvalidOperationException("The CP-500 is not running.");
+
+        await RebuildCp500(rs232, CurrentHardDisk());
+    }
+
+    /// <summary>
+    /// Rebuilds through <see cref="RebuildCp500"/>. The cable is the live profile flag plus the current endpoint.
+    /// The board is installed on the bay slot and the one clock when <paramref name="installed"/> is true.
+    /// The slot and its image stay.
+    /// </summary>
+    public async Task SetCp500HardDisk(bool installed)
+    {
+        if (_cp500Machine == null || _cp500Rom == null)
+            throw new InvalidOperationException("The CP-500 is not running.");
+
+        if (installed)
+            _cp500Clock ??= new OffsetClock(() => DateTime.Now);
+
+        var cable = new Rs232Attachment(_cp500Machine.Profile.Rs232Installed, _cp500Serial);
+        await RebuildCp500(cable, installed ? InstalledHardDisk() : HardDiskAttachment.None);
+        StatusText = installed ? "CP-500 hard disk on" : "CP-500 hard disk off";
+    }
+
+    /// <summary>Pauses the CPU, then inserts. A bad image leaves the slot and is reported on <see cref="StatusText"/>.</summary>
+    public async Task MountCp500HardDisk(
+        byte[] image,
+        string name,
+        Action<byte[]>? writeBack,
+        bool readOnly = false,
+        HardDiskGeometry? rawGeometry = null)
+    {
+        try
+        {
+            await WithCp500Paused(() => _cp500Drives.HardDisk.Insert(image, name, writeBack, readOnly, rawGeometry));
+            StatusText = $"Inserted {name}";
+        }
+        catch (Exception ex) when (ex is InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            StatusText = $"Could not insert {name}: {ex.Message}";
+        }
+    }
+
+    /// <summary>Pauses the CPU, then ejects. A failed save leaves the image mounted.</summary>
+    public async Task EjectCp500HardDisk()
+    {
+        try
+        {
+            await WithCp500Paused(() => _cp500Drives.HardDisk.Eject());
+            StatusText = "Ejected hard disk";
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            StatusText = $"Could not save the hard disk, image kept: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// The one machine builder for RS-232 and the hard disk. Applies both attachments.
+    /// Disposes the previous serial endpoint only when the replacement endpoint is a different object.
+    /// A failed construct leaves the running machine in place.
+    /// </summary>
+    private async Task RebuildCp500(Rs232Attachment rs232, HardDiskAttachment hardDisk)
     {
         if (_cp500Machine == null || _cp500Rom == null)
             throw new InvalidOperationException("The CP-500 is not running.");
@@ -467,18 +538,20 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ISerialEndpoint? previousEndpoint = _cp500Serial;
         try
         {
-            Cp500MachineProfile profile = rs232.Apply(new Cp500MachineProfile(
+            Cp500MachineProfile profile = hardDisk.Apply(rs232.Apply(new Cp500MachineProfile(
                 previous.Profile.RamSizeKiB,
                 previous.Profile.InstalledDrives)
             {
                 ClockHz = previous.Profile.ClockHz
-            });
-            var machine = new Cp500Machine(profile, _cp500Rom, _cp500Drives.Images, serial: rs232);
+            }));
+            var machine = new Cp500Machine(
+                profile, _cp500Rom, _cp500Drives.Images, serial: rs232, hardDisk: hardDisk);
             machine.SpeedFactor = Cp500SpeedFactor;
             _cp500Machine = machine;
             _cp500Serial = rs232.Endpoint;
             ResetCp500Machine();
-            previousEndpoint?.Dispose();
+            if (!ReferenceEquals(previousEndpoint, rs232.Endpoint))
+                previousEndpoint?.Dispose();
         }
         catch
         {
@@ -492,6 +565,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         ActiveMachineChanged?.Invoke();
         if (wasRunning)
             StartCp500();
+    }
+
+    private HardDiskAttachment CurrentHardDisk() =>
+        _cp500Machine?.Profile.HardDiskInstalled == true
+            ? InstalledHardDisk()
+            : HardDiskAttachment.None;
+
+    private HardDiskAttachment InstalledHardDisk()
+    {
+        if (_cp500Clock is not { } clock)
+            throw new InvalidOperationException("The hard disk has no clock.");
+
+        return HardDiskAttachment.Install(_cp500Drives.HardDisk, clock);
     }
 
     private async Task WithCp500Paused(Action action)
