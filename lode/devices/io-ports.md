@@ -147,15 +147,23 @@ owner and one write owner, and there are no alias ranges.
 
 | Ports | IN | OUT | Owner (IN / OUT) |
 |-------|----|-----|------------------|
-| E0-E3 | `~(irqMask & irqPending)`, active low. Sources stay latched | IRQ mask (bit 2 = 30 Hz timer; other bits accepted, never asserted) | `Cp500InterruptDevice` |
+| E0-E3 | `~(mask & (timer pending or live RS-232 flags))`, active low. The read clears nothing. | IRQ mask. Bit 2 is the 30 Hz timer. Bits 4, 5, and 6 are RS-232 transmit-empty, data-received, and receiver error when the board is installed. Bits 0, 1, and 3 are accepted and never asserted. | `Cp500InterruptDevice` |
 | E4-E7 | `~(nmiMask & nmiStatus)`; bit 7 mirrors the live FDC INTRQ line | NMI mask (bit 7 FDC INTRQ) | `Cp500InterruptDevice` |
+| E8 | Modem status. 1 is true: d7 CTS, d6 DSR, d5 carrier, d4 ring, d1 receiver line (idle mark is 1). d3, d2, and d0 read 0. Uninstalled, the port reads FFh. | Bit 1 is the UART control-load level. It does not reset the UART. | `Cp500Rs232Device` |
+| E9 | FFh. There is no configuration-switch read. | High nibble transmit baud, low nibble receive baud. Indices 0 through 15 are 50, 75, 110, 134.5, 150, 300, 600, 1200, 1800, 2000, 2400, 3600, 4800, 7200, 9600, 19200. | `Cp500Rs232Device` |
+| EA | UART status, 1 is true: d7 data received, d6 transmit holding empty, d5 overrun, d4 framing, d3 parity. d2 through d0 read 1. The read clears nothing. | UART control word, and only while E8 bit 1 is 1. Word: d7 even parity, d6/d5 length (11=8, 01=7, 10=6, 00=5), d4 two stop bits, d3 parity inhibit, d2 break when 0, d1 RTS, d0 DTR. Reset value 6Ch. | `Cp500Rs232Device` |
+| EB | Assembled byte. Clears data received only. Overrun, framing, and parity change when the next stop bit is judged. | Queues a byte and clears transmit-holding-empty until the start bit begins. | `Cp500Rs232Device` |
 | EC-EF | Acknowledges the timer IRQ (clears only bit 2 pending), returns 00h | Video/misc control latch | `Cp500InterruptDevice` / `Cp500VideoDevice` |
 | F0-F3 | WD1791 status, track, sector, data | WD1791 command, track, sector, data | `Wd1791Controller` |
 | F4-F7 | Toggles the ROM A11 flip-flop, returns 00h | Drive select (bits 0-3), side (4), WAIT (6), MFM (7) | `Cp500SystemRom` / `Cp500DiskControlDevice` |
 | F8-FB | Printer status (select, no fault; BUSY when the printer is busy) | Printer data | `Cp500PrinterPort` |
 | FF | 00h, no side effects (no cassette attached) | Ignored | `Cp500CassettePort` |
 
-E8-EB (RS-232) is not modelled and reads as open bus. The F4-F7 bit 7 write
+With the RS-232 board uninstalled, E8-EB stay unregistered and read FFh.
+cp500-os must use the four ports as distinct registers, set E8 bit 1 before
+an EA control write, put transmit baud in the high E9 nibble and receive baud
+in the low nibble, treat EA as active high, enable E0 bits 4-6, and not read
+switches from E9. The F4-F7 bit 7 write
 selects MFM (set) or FM (clear) density for the WD1791.
 
 ```csharp

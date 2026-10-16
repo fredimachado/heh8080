@@ -90,8 +90,18 @@ graph TB
   an edge (`NonMaskableInterruptRaised`) raised when an enabled source becomes
   active. FDC INTRQ is the only NMI source (E4 bit 7) and its status bit
   mirrors the live line. The 30 Hz timer is driven by `AdvanceCycles` from the
-  CPU clock. Cassette and RS-232 sources are not modelled.
+  CPU clock. Cassette sources are not modelled. RS-232 bits 4, 5, and 6 are
+  sampled from `Cp500Rs232Device` when the board is installed, and an E0 read
+  does not clear the timer.
   `Cp500CassettePort` answers `FFh` with 00h and discards writes.
+- `Cp500Rs232Device` owns `E8h`, `E9h`, `EAh`, and `EBh` when
+  `Cp500MachineProfile.Rs232Installed` is set. The flag defaults to false, so
+  those ports otherwise read `FFh`. `E8h` out bit 1 is the UART control-load
+  level, not a reset. `E9h` in is `FFh` (no switch read); its out nibbles
+  select transmit baud (high) and receive baud (low). `EAh` status is active
+  high and a read clears nothing. `EBh` in clears data-received only.
+  `Cp500Machine.Step` is the only production clock. What cp500-os must
+  program is in [the expansion plan](../plans/cp500-expansions.md).
 - `Cp500VideoDevice` owns `ECh-EFh` writes (non-cassette video control). Bit 2
   selects 32-column rendering and bit 3 selects the alternate (katakana)
   character set for `C0h-FFh`. Mode changes do not mutate VRAM.
@@ -119,7 +129,8 @@ graph TB
 ## Rationale and lessons
 
 The model covers the hardware contracts needed for ROM bring-up and disk I/O
-without claiming a cassette transport, RS-232 or a real-time clock. The host
+without claiming a cassette transport or a real-time clock. RS-232 is optional
+and off unless `Rs232Installed` is set. The host
 boundary stays narrow: bytes in, a write-back callback out. Platform code
 supplies file IO while the drive logic and persistence policy are unit-tested
 in Devices.

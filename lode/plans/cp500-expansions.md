@@ -1,7 +1,7 @@
 # CP-500 Expansion Hardware Plan
 
-Status: the headless host in section 0 is implemented. RS-232, the virtual
-hard disk, and the network card are still planned.
+Status: the headless host in section 0 and the RS-232 board in section 1 are
+implemented. The virtual hard disk and the network card are still planned.
 
 This plan drives the hardware side of
 [cp500-os](https://github.com/fredimachado/cp500-os) (design in its
@@ -90,33 +90,58 @@ not need `cp500.rom`.
 
 ## 1. RS-232 board
 
-Model III RS-232: TR1602 UART and BR1941 baud generator.
+Implemented. Verified against MAME `trs80m3_m.cpp` and `ay31015.cpp`.
+`Cp500Rs232Device` owns `E8h`, `E9h`, `EAh`, and `EBh` as four registers, not
+one mirrored block. `Rs232Installed` defaults to false, so a stock machine
+still reads `FFh` there. `Cp500Machine.Step` clocks the board with the
+instruction's cycle count. Sockets and COM ports are opened only by
+`Heh8080.Rs232`.
 
 | Port | IN | OUT |
 |------|----|-----|
-| `E8h` | Modem status (CTS, DSR, CD, RI) | Master reset |
-| `E9h` | Configuration switches | Baud rate (receive nibble, transmit nibble) |
-| `EAh` | UART status (data ready, TX empty, overrun, framing, parity) | UART and modem control (word length, parity, stop bits, DTR, RTS, break) |
-| `EBh` | Receive data | Transmit data |
+| `E8h` | d7 CTS, d6 DSR, d5 carrier, d4 ring, d1 receiver line. Idle mark is 1. d3, d2, and d0 read 0. 1 means the signal is true. | Stores bit 1 as the control-load level. This write does not reset the UART. |
+| `E9h` | `FFh`. There is no configuration-switch read. | High nibble selects transmit baud. Low nibble selects receive baud. |
+| `EAh` | d7 data received, d6 transmit holding empty, d5 overrun, d4 framing, d3 parity. d2 through d0 read 1. The read clears nothing. | Loads the UART control word only while E8 bit 1 is 1. Otherwise the write changes nothing. |
+| `EBh` | Returns the assembled byte and clears data-received only. | Queues a byte and clears transmit-holding-empty until the start bit begins. |
 
-Interrupts in `Cp500InterruptDevice`: `E0h` bits 4 (transmit empty),
-5 (receive ready), 6 (error). Today those mask bits are accepted and never
-assert; the UART becomes their source.
+Baud indices 0 through 15 are 50, 75, 110, 134.5, 150, 300, 600, 1200, 1800,
+2000, 2400, 3600, 4800, 7200, 9600, and 19200. The bit clock is 16 samples
+per bit. Reset leaves both nibbles at 0, so an unprogrammed board runs at
+50 baud, and loads control word `6Ch`: 8 bits, parity inhibited, one stop
+bit, break off, RTS clear, DTR clear.
 
-Timing: bytes move at the programmed baud rate in emulated cycles, so software
-that depends on it (terminal programs, the OS driver) sees realistic overruns.
+The control word is d7 even parity, d6 and d5 word length (`11` is 8, `01`
+is 7, `10` is 6, `00` is 5), d4 two stop bits, d3 parity inhibit, d2 break
+when 0, d1 RTS, d0 DTR. RTS and DTR stay in that word. They do not change `E8h`.
 
-Host side, `ISerialEndpoint` with one implementation per mode:
+Overrun, framing, and parity change when the next stop bit is judged.
+Overrun means data-received was still set. The old byte stays. Framing means
+the stop bit was low.
 
-- **TCP client or listener**: raw bytes to a socket, for null-modem links
-  between emulators or to a host program.
-- **Host COM port**: real hardware.
-- **Modem bridge**: a Hayes-compatible "Wi-Fi modem", the device retro users
-  actually plug in today. Command mode understands `AT`, `ATZ`, `ATE0/1`,
-  `ATDT host:port` (opens TCP, answers `CONNECT`), `+++` with guard time,
-  `ATH`, `ATO`, and `ATS0=1` to accept incoming connections. Result codes
-  `OK`, `CONNECT`, `NO CARRIER`, `ERROR`. Carrier detect follows the TCP
-  connection.
+`E0h` bit 4 is transmit-empty, bit 5 is data-received, and bit 6 is a
+receiver error (framing, parity, or overrun). `Cp500InterruptDevice` samples
+those levels into `~(mask & (timer pending | RS-232 flags))`. It does not
+store a second copy. An `E0h` read leaves a pending 30 Hz timer pending.
+`ECh`-`EFh` still clears only the timer bit.
+
+Both `heh8080-cp500` programs take `--rs232 off`, `--rs232 tcp:<host>:<port>`,
+`--rs232 listen:<port>`, `--rs232 hayes:<port>`, or `--rs232 com:<name>`.
+Omitting the flag is `off`. The FJM-3A configuration dialog has the same
+choices. Hayes, in `Heh8080.Rs232`, answers `AT`, `ATZ`, `ATE0`, `ATE1`,
+`ATDT host:port`, `ATH`, `ATO`, `ATS0=0` through `255`, and `ATA`. Result
+codes are `OK`, `CONNECT`, `NO CARRIER`, and `ERROR`. Carrier follows the
+TCP connection. The `+++` guard is one emulated second, counted in
+`AdvanceCycles`, not wall time. `ATDT` starts the connect and queues
+`CONNECT` or `NO CARRIER` when the socket finishes. It does not block `Step`.
+
+cp500-os has to program this map, not the earlier draft:
+
+- Treat `E8h`, `E9h`, `EAh`, and `EBh` as distinct ports.
+- Set `E8h` bit 1 before a control write to `EAh`. That bit is not a master reset.
+- Program transmit baud in the high nibble of `E9h` and receive baud in the low nibble.
+- Treat `EAh` status as active high, including the forced 1s in bits 2 through 0. The read clears nothing.
+- Enable `E0h` bits 4, 5, and 6 for transmit-empty, data-received, and receiver error.
+- Do not read configuration switches from `E9h`. A read is `FFh`.
 
 ## 2. Virtual hard disk
 
@@ -176,7 +201,7 @@ which here means the host.
 ## Order
 
 1. Headless runner and MCP tools. Done. See section 0.
-2. RS-232 board with the TCP and modem bridge endpoints.
+2. RS-232 board with TCP, Hayes, and COM. Done. See section 1.
 3. Virtual hard disk with clock.
 4. Network card.
 
