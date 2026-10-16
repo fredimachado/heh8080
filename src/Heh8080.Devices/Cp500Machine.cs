@@ -12,6 +12,7 @@ public sealed class Cp500Machine
     public static readonly TimeSpan BreakHoldDuration = TimeSpan.FromSeconds(1);
 
     private readonly CycleThrottle _throttle;
+    private readonly Cp500Rs232Device? _rs232;
     private long _breakCyclesRemaining;
     private double _speedFactor = 1;
     private bool _pacedForTyping;
@@ -21,9 +22,14 @@ public sealed class Cp500Machine
         Cp500MachineProfile profile,
         ReadOnlySpan<byte> systemRom,
         IModelIIIDiskImageProvider? diskImages = null,
-        IPrinterDevice? printer = null)
+        IPrinterDevice? printer = null,
+        Rs232Attachment serial = default)
     {
         Profile = profile ?? throw new ArgumentNullException(nameof(profile));
+        if (serial.Installed != profile.Rs232Installed)
+            throw new ArgumentException("RS-232 attachment does not match Rs232Installed.");
+        if (!serial.Installed && serial.Endpoint is not null)
+            throw new ArgumentException("An RS-232 endpoint requires Rs232Installed.");
         if (systemRom.Length == 0)
             throw new ArgumentException("A CP-500 system ROM is required.", nameof(systemRom));
 
@@ -54,6 +60,14 @@ public sealed class Cp500Machine
         DiskControl.Register(IoBus);
         Printer.Register(IoBus);
         Cassette.Register(IoBus);
+        if (profile.Rs232Installed)
+        {
+            _rs232 = new Cp500Rs232Device(profile.ClockHz, serial.Endpoint);
+            _rs232.Register(IoBus);
+            Interrupts.AttachRs232(_rs232);
+            _rs232.StatusChanged = Interrupts.UpdateLines;
+        }
+
         Interrupts.InterruptLineChanged += asserted => Cpu.SetInterruptLine(asserted);
         Interrupts.NonMaskableInterruptRaised += Cpu.NonMaskableInterrupt;
         DiskController.InterruptRequestChanged += Interrupts.SetFdcInterruptRequest;
@@ -120,8 +134,9 @@ public sealed class Cp500Machine
     }
 
     /// <summary>
-    /// Executes one Z80 instruction, advances the cycle-driven hardware (disk controller and
-    /// 30 Hz timer) by its duration, and calculates the host delay needed for real-time pacing.
+    /// Executes one Z80 instruction, advances the cycle-driven hardware (disk controller,
+    /// 30 Hz timer, and the RS-232 board when it is installed) by that instruction's cycle count,
+    /// and calculates the host delay needed for real-time pacing.
     /// </summary>
     public int Step()
     {
@@ -129,6 +144,7 @@ public sealed class Cp500Machine
         int cycles = Cpu.Step();
         DiskController.AdvanceCycles(cycles);
         Interrupts.AdvanceCycles(cycles);
+        _rs232?.AdvanceCycles(cycles);
         AdvanceBreakHold(cycles);
         Cpu.WaitLine = DiskControl.WaitActive;
         if (_speedFactor != 1)
@@ -156,6 +172,7 @@ public sealed class Cp500Machine
         DiskController.Reset();
         DiskControl.Reset();
         Interrupts.Reset();
+        _rs232?.Reset();
         Video.ResetControl();
         _throttle.Reset();
         LastSuggestedDelay = TimeSpan.Zero;

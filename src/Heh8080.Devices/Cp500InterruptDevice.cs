@@ -6,12 +6,13 @@ namespace Heh8080.Devices;
 /// CP-500 / Model III interrupt fabric. E0h-E3h hold the IRQ mask and
 /// active-low IRQ status, E4h-E7h the NMI mask and active-low NMI status,
 /// and reads of ECh-EFh acknowledge the 30 Hz timer. Cassette sources are
-/// accepted in the mask but never asserted.
+/// accepted in the mask but never asserted. RS-232 bits 4, 5, and 6 are sampled
+/// from the UART when a board is attached. They are not stored here.
 /// </summary>
 /// <remarks>
-/// The IRQ line is a level: it follows <c>mask &amp; pending</c> and stays high
-/// until the timer is acknowledged. NMI is raised as an edge whenever an enabled
-/// source becomes active; FDC INTRQ is the only NMI source and its status bit
+/// The IRQ line is a level: it follows <c>mask &amp; (timer pending | live RS-232 flags)</c>.
+/// An E0h read changes nothing. ECh-EFh clear only the timer bit. NMI is raised as an edge
+/// whenever an enabled source becomes active; FDC INTRQ is the only NMI source and its status bit
 /// mirrors the live controller line.
 /// </remarks>
 public sealed class Cp500InterruptDevice : IIoDevice
@@ -24,6 +25,9 @@ public sealed class Cp500InterruptDevice : IIoDevice
     public const byte LastTimerAcknowledgePort = 0xEF;
 
     public const byte IrqTimer = 0x04;
+    public const byte IrqRs232Transmit = 0x10;
+    public const byte IrqRs232Receive = 0x20;
+    public const byte IrqRs232Error = 0x40;
     public const byte NmiFdcIntrq = 0x80;
 
     /// <summary>Frequency of the timer interrupt.</summary>
@@ -37,6 +41,7 @@ public sealed class Cp500InterruptDevice : IIoDevice
     private bool _nmiLine;
     private long _cycle;
     private long _timerDeadlineCycles;
+    private Cp500Rs232Device? _rs232;
 
     /// <summary>Creates the interrupt fabric with a timer derived from the emulated CPU clock.</summary>
     public Cp500InterruptDevice(long clockHz)
@@ -73,6 +78,9 @@ public sealed class Cp500InterruptDevice : IIoDevice
         UpdateLines();
     }
 
+    /// <summary>Samples this UART for IRQ bits 4, 5, and 6. The machine calls it once.</summary>
+    internal void AttachRs232(Cp500Rs232Device device) => _rs232 = device;
+
     /// <summary>Follows the FDC INTRQ line, which drives the NMI status bit.</summary>
     public void SetFdcInterruptRequest(bool active)
     {
@@ -105,7 +113,7 @@ public sealed class Cp500InterruptDevice : IIoDevice
         switch (port)
         {
             case >= FirstIrqPort and <= LastIrqPort:
-                return (byte)~(_irqMask & _irqPending);
+                return (byte)~(_irqMask & PendingSources);
             case >= FirstNmiPort and <= LastNmiPort:
                 return (byte)~(_nmiMask & NmiSources);
             case >= FirstTimerAcknowledgePort and <= LastTimerAcknowledgePort:
@@ -134,9 +142,29 @@ public sealed class Cp500InterruptDevice : IIoDevice
 
     private byte NmiSources => _fdcIntrq ? NmiFdcIntrq : (byte)0;
 
-    private void UpdateLines()
+    private byte PendingSources => (byte)(_irqPending | Rs232Sources);
+
+    private byte Rs232Sources
     {
-        bool irq = (_irqMask & _irqPending) != 0;
+        get
+        {
+            if (_rs232 is null)
+                return 0;
+
+            byte bits = 0;
+            if (_rs232.TransmitHoldingEmpty)
+                bits |= IrqRs232Transmit;
+            if (_rs232.DataReceived)
+                bits |= IrqRs232Receive;
+            if (_rs232.ReceiverError)
+                bits |= IrqRs232Error;
+            return bits;
+        }
+    }
+
+    internal void UpdateLines()
+    {
+        bool irq = (_irqMask & PendingSources) != 0;
         if (irq != _irqLine)
         {
             _irqLine = irq;

@@ -36,4 +36,10 @@ public sealed record Cp500MachineProfile
 
     /// <summary>Z80 clock rate used by <see cref="Heh8080.Core.CycleThrottle"/> and the 30 Hz timer.</summary>
     public long ClockHz { get; init; } = 2_030_000;
+
+    /// <summary>
+    /// Model III RS-232 board. Stock machines leave this false, so E8h-EBh stay unregistered and read FFh.
+    /// <see cref="Rs232Attachment.Apply"/> is the production writer.
+    /// </summary>
+    public bool Rs232Installed { get; init; }
 }
