@@ -26,7 +26,7 @@
     </Window.Styles>
 
     <Border BorderBrush="#33FF33" BorderThickness="2" CornerRadius="4">
-        <StackPanel Margin="24" Spacing="16">
+        <StackPanel Margin="24" Spacing="8">
             <!-- Title Bar -->
             <DockPanel Margin="0,0,0,8">
                 <Button DockPanel.Dock="Right" Content="X" Click="Close_Click"
