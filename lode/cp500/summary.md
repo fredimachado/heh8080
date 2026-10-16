@@ -127,11 +127,18 @@ countdown tests and `RealRomWithEmptyDrivesResetHoldingBreakReachesBasic` in
 
 ## Rationale and lessons
 
-Keeping the composition in Devices lets Desktop, Browser, tests, and a future
-headless runner share exactly one CP-500 hardware contract. Time is driven by
+Keeping the composition in Devices lets Desktop, Browser, tests, and
+`heh8080-cp500` share exactly one CP-500 hardware contract. Time is driven by
 `Step`, so tests are deterministic and a host cannot drift the timer from the
 CPU. Treating an installed drive as present even when empty is what makes the
 ROM show `Diskette?` like the real machine instead of silently entering BASIC.
+
+`heh8080-cp500` boots a caller-supplied ROM, types on the matrix, and waits
+until `Cp500Screen.ToText` contains a snippet. The wait counts Z80 cycles at
+2.03 MHz. Exit code 0 means the snippet appeared. A timeout is exit code 1.
+A refusal is exit code 2. `--disk2` installs 3 drives
+and `--disk3` installs 4. RAM stays 48 KiB. Flags, the codec, and the MCP
+tool names are in [cp500-expansions.md](../plans/cp500-expansions.md) section 0.
 
 Related: [memory-map.md](memory-map.md), [devices.md](devices.md),
 [desktop-integration.md](desktop-integration.md), [../core/z80.md](../core/z80.md),

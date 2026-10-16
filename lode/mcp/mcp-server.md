@@ -6,6 +6,18 @@ heh8080 includes an MCP (Model Context Protocol) server that enables AI assistan
 
 The MCP server runs as an alternative mode of the Desktop application, exposing CP/M machine controls as MCP tools. This enables programmatic interaction with CP/M for automated development and testing.
 
+## CP-500
+
+`Heh8080.Desktop --mcp` is still the CP/M server in the rest of this page. The CP-500 tools run in a separate process.
+
+```text
+heh8080-cp500 --mcp --rom stub.rom --disk0 build/boot.dsk
+```
+
+The wire names are the PascalCase method names `Boot`, `Type`, `ReadScreen`, `PeekMemory`, `PokeMemory`, and `Step`. There is no `WaitForText`. A refused call throws. The SDK then sets `isError`. A screen whose text is the word "Error" is still a successful `ReadScreen`.
+
+Batch flags, the emulated timeout, exit codes, the screen codec, and the rule that drives 2 and 3 raise the installed count are in [cp500-expansions.md](../plans/cp500-expansions.md) section 0.
+
 ## Architecture
 
 ```
@@ -204,6 +216,9 @@ list_breakpoints() -> "Breakpoints: 0100, 0200, 0300"
 | `src/Heh8080.Mcp/CpmTools.cs` | MCP tool definitions |
 | `src/Heh8080.Mcp/McpServerHost.cs` | MCP server host setup |
 | `src/Heh8080.Desktop/Program.cs` | Entry point with --mcp handling |
+| `src/Heh8080.Cp500/Program.cs` | `heh8080-cp500` process edge |
+| `src/Heh8080.Mcp/Cp500Tools.cs` | CP-500 MCP tools |
+| `src/Heh8080.Mcp/Cp500McpHost.cs` | CP-500 stdio host |
 
 ### CpmMachine
 

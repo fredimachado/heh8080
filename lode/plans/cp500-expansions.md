@@ -1,6 +1,9 @@
 # CP-500 Expansion Hardware Plan
 
-Status: planned, nothing implemented. Drives the hardware side of
+Status: the headless host in section 0 is implemented. RS-232, the virtual
+hard disk, and the network card are still planned.
+
+This plan drives the hardware side of
 [cp500-os](https://github.com/fredimachado/cp500-os) (design in its
 `docs/design.md`, section 9), but every device models real hardware so other
 TRS-80 software can use it too.
@@ -23,20 +26,67 @@ MAME `trs80m3` and the datasheets before implementing.
 
 ## 0. Headless runner (prerequisite for OS development)
 
-A command-line host for `Cp500Machine`, so the OS repository can boot images in
-tests and CI:
+Implemented. The executable is `heh8080-cp500` (`src/Heh8080.Cp500`). It is a
+separate program, not a flag on `Heh8080.Desktop`. Desktop `--mcp` is still
+the CP/M server.
 
 ```text
-heh8080-cp500 --rom stub.rom --disk0 build/boot.dsk \
-  --type "ls /bin\r" --until-screen "ok" --timeout 30s --dump-screen
+heh8080-cp500 --rom stub.rom --disk0 build/boot.dsk --type "ls /bin\r" --until-screen "ok" --timeout 30s --dump-screen
 ```
 
-- Exit code 0 when `--until-screen` text appears, 1 on timeout.
-- `--dump-screen` prints the 64x16 VRAM as text (via the character set mapping
-  the desktop already uses).
-- Runs unthrottled; time is emulated cycles, so runs are reproducible.
-- The same operations as MCP tools in `Heh8080.Mcp` (boot, type, read screen,
-  read/write memory, step), so an agent can drive the OS interactively.
+`--rom` is required. `--disk0`, `--disk1`, `--disk2`, and `--disk3` are
+optional image paths. RAM stays 48 KiB. The clock stays 2.03 MHz. There is no
+profile flag.
+
+Installed drives start at 2, the count on `Cp500MachineProfile.Original`. A
+drive index outside 0 through 3 is refused. No disks, or only `--disk0` and
+`--disk1`, keeps 2 installed drives. `--disk2` installs 3. `--disk3` installs
+4. The controller can select every drive in that count.
+
+`--timeout 30s` is 30 emulated seconds at 2.03 MHz, which is 60,900,000
+cycles. The unit suffix is required, `s` or `ms`. The budget starts when
+typing finishes. It is not wall-clock time. The host never sleeps on
+`LastSuggestedDelay`.
+
+`--until-screen` is a case-sensitive substring of the screen text
+(`StringComparison.Ordinal`). The check reads all 64 by 16 video cells, and
+32-column mode does not change that. An empty pattern is refused.
+`--until-screen` and `--timeout` are accepted only together.
+
+`--type` sends TRS-80 keystrokes. SHIFT is held only for a stroke whose mode
+is `Cp500ShiftMode.Shifted`. A CR, or the two characters `\` and `r`, is
+ENTER. `\`, `]`, `^`, `_`, and any other character the key map refuses are
+rejected before the first key goes down.
+
+`Cp500Screen.ToText` is the screen codec. Bytes `0x20` through `0x7E` stay.
+Every other byte becomes a space. The host trims the end of each row, joins
+the rows with `\n`, and writes no extra trailing newline.
+
+`--dump-screen` writes that text to stdout when the run stops, on exit 0 and
+on exit 1. The bytes are raw UTF-8, so a Windows console does not rewrite the
+line endings. Stderr is refusals only. A timeout does not print a message.
+
+The process uses these exit codes.
+
+- 0 when the until-screen text appeared, or when the batch had no until-screen and finished.
+- 1 when the until-screen text did not appear within the emulated budget.
+- 2 when the run was refused. A refusal is a bad flag, a missing file, a ROM that is empty or longer than 16 KiB, a bad disk image, an unmapped character, or a flush failure.
+
+Disks are written back when the process disposes the session, after the dump
+is written. A flush failure exits 2 even when the screen already matched.
+
+`--mcp` starts the stdio server instead of a batch. It takes `--rom` and the
+same disk flags. Combining it with `--type`, `--until-screen`, `--timeout`,
+or `--dump-screen` exits 2.
+
+The MCP tools in that process are `Boot`, `Type`, `ReadScreen`,
+`PeekMemory`, `PokeMemory`, and `Step`. The wire names are those PascalCase
+method names. There is no `WaitForText`. A refusal throws.
+
+cp500-os needs the executable name `heh8080-cp500`, the flags above, an
+emulated timeout with `s` or `ms`, exit codes 0, 1, and 2, the screen codec
+above, and the rule that drives 2 and 3 raise the installed count. It does
+not need `cp500.rom`.
 
 ## 1. RS-232 board
 
@@ -125,12 +175,12 @@ which here means the host.
 
 ## Order
 
-1. Headless runner and MCP tools (unblocks cp500-os milestone 1).
+1. Headless runner and MCP tools. Done. See section 0.
 2. RS-232 board with the TCP and modem bridge endpoints.
 3. Virtual hard disk with clock.
 4. Network card.
 
-Each step: device unit tests against the register contract, a machine-level
+Each remaining hardware step: device unit tests against the register contract, a machine-level
 test with a tiny ROM program, then a ConfigDialog option and a desktop smoke
 test.
 
