@@ -33,6 +33,7 @@ graph TB
     FDC -->|INTRQ| Int
     Bus --> Printer[F8-FB Printer]
     Bus --> Cass[FF cassette stub]
+    Bus --> HD[C0-CF FreHD, when installed]
     Memory[Mapped memory] --> VRAM[3C00-3FFF Video]
     Memory --> Keyboard[3800-3BFF Keyboard]
 ```
@@ -102,6 +103,18 @@ graph TB
   high and a read clears nothing. `EBh` in clears data-received only.
   `Cp500Machine.Step` is the only production clock. What cp500-os must
   program is in [the expansion plan](../plans/cp500-expansions.md).
+- `Cp500HardDiskController` owns `C0h`-`CFh` when
+  `Cp500MachineProfile.HardDiskInstalled` is set. The flag defaults to false,
+  so those ports otherwise read `FFh`. `HardDiskAttachment.Apply` is the only
+  production writer of the flag. While a command is busy, every read returns
+  status and every write is ignored. DRQ (`08h`) is set with busy clear:
+  ready, seek complete, and DRQ is `58h`. Sector 0 is valid. The clock is
+  extra command `01h` on `C4h`, then six binary bytes from `C2h` in the order
+  seconds, minutes, hours, year since 2000, day, month. Command `02h` writes
+  those six bytes back. `IClock` supplies the time. `Heh8080.Devices` does
+  not call `DateTime.Now` and does not open files. `Cp500DriveBay.HardDisk`
+  is the one slot and does not change `InstalledDrives`. What cp500-os must
+  program is in [the expansion plan](../plans/cp500-expansions.md).
 - `Cp500VideoDevice` owns `ECh-EFh` writes (non-cassette video control). Bit 2
   selects 32-column rendering and bit 3 selects the alternate (katakana)
   character set for `C0h-FFh`. Mode changes do not mutate VRAM.
@@ -129,11 +142,11 @@ graph TB
 ## Rationale and lessons
 
 The model covers the hardware contracts needed for ROM bring-up and disk I/O
-without claiming a cassette transport or a real-time clock. RS-232 is optional
-and off unless `Rs232Installed` is set. The host
-boundary stays narrow: bytes in, a write-back callback out. Platform code
-supplies file IO while the drive logic and persistence policy are unit-tested
-in Devices.
+without claiming a cassette transport. RS-232 and the FreHD hard disk are
+optional and off unless their profile flags are set. The FreHD clock is part
+of that board. The host boundary stays narrow: bytes in, a write-back
+callback out. Platform code supplies file IO while the drive logic and
+persistence policy are unit-tested in Devices.
 
 Related: [summary.md](summary.md), [memory-map.md](memory-map.md),
 [desktop-integration.md](desktop-integration.md), [headless-runner.md](headless-runner.md),

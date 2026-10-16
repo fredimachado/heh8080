@@ -34,10 +34,16 @@ public sealed class Cp500Automation
         ReadOnlySpan<byte> systemRom,
         Cp500DriveBay? drives = null,
         Cp500MachineProfile? profile = null,
-        Rs232Attachment rs232 = default)
+        Rs232Attachment rs232 = default,
+        HardDiskAttachment hardDisk = default)
     {
         Drives = drives ?? new Cp500DriveBay();
-        Machine = new Cp500Machine(profile ?? Cp500MachineProfile.Original, systemRom, Drives.Images, serial: rs232);
+        Machine = new Cp500Machine(
+            profile ?? Cp500MachineProfile.Original,
+            systemRom,
+            Drives.Images,
+            serial: rs232,
+            hardDisk: hardDisk);
         if (Machine.Profile.InstalledDrives > 0 && !Drives.Images.IsMounted(0))
             Machine.ResetHoldingBreak();
     }

@@ -283,6 +283,104 @@ public sealed class Cp500CommandTests
     }
 
     [Fact]
+    public void HardDiskIsOffUntilRequestedAndChsNeedsTheFile()
+    {
+        Cp500Command.Batch plain = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse(["--rom", "stub.rom"]));
+        Assert.Null(plain.Files.HardDisk);
+
+        Cp500Rejected missing = Assert.Throws<Cp500Rejected>(() =>
+            Cp500Command.Parse(["--rom", "stub.rom", "--chs", "1,1,1"]));
+        Assert.Equal("--chs requires --hard-disk.", missing.Message);
+
+        Cp500Rejected shape = Assert.Throws<Cp500Rejected>(() =>
+            Cp500Command.Parse(["--rom", "stub.rom", "--hard-disk", "disk.hdv", "--chs", "1,1"]));
+        Assert.Equal("--chs needs <cylinders>,<heads>,<sectors>.", shape.Message);
+
+        Cp500Rejected range = Assert.Throws<Cp500Rejected>(() =>
+            Cp500Command.Parse(["--rom", "stub.rom", "--hard-disk", "disk.hdv", "--chs", "0,1,1"]));
+        Assert.Equal("--chs needs cylinders 1-1023, heads 1-8, and sectors 1-256.", range.Message);
+
+        Cp500Command.Serve serve = Assert.IsType<Cp500Command.Serve>(Cp500Command.Parse([
+            "--mcp", "--rom", "stub.rom", "--hard-disk", "disk.hdv", "--chs", "2,1,4",
+        ]));
+        Assert.Equal("disk.hdv", serve.Files.HardDisk!.Value.Path);
+        Assert.Equal(new HardDiskGeometry(2, 1, 4), serve.Files.HardDisk.Value.RawGeometry);
+    }
+
+    [Fact]
+    public void TheSessionMountsItsOwnHardDiskAndWritesTheLoadedFormat()
+    {
+        using var dir = new TempRom();
+        string statusRom = System.IO.Path.Combine(dir.Path, "status.rom");
+        string writeRom = System.IO.Path.Combine(dir.Path, "write.rom");
+        string image = System.IO.Path.Combine(dir.Path, "disk.hdv");
+        string raw = System.IO.Path.Combine(dir.Path, "body.img");
+        string floppy = System.IO.Path.Combine(dir.Path, "disk2.dsk");
+        File.WriteAllBytes(statusRom, [0xDB, 0xCF, 0x32, 0x00, 0x40, 0x18, 0xFE]);
+        File.WriteAllBytes(writeRom, WriteSectorOf5A);
+        File.WriteAllBytes(floppy, new byte[ModelIIIDiskGeometry.DiskSizeBytes]);
+
+        Cp500Command.Batch off = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse(["--rom", statusRom]));
+        using (Cp500Session quiet = Cp500Files.Load(off.Files))
+            Assert.Equal(new byte[] { 0xFF }, quiet.Peek(0x4000, 1));
+
+        byte[] original = OneSector(0x11);
+        File.WriteAllBytes(image, original);
+        Cp500Command.Batch on = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse([
+            "--rom", statusRom, "--disk2", floppy, "--hard-disk", image,
+        ]));
+        using (Cp500Session session = Cp500Files.Load(on.Files))
+        {
+            Assert.Equal(3, session.InstalledDrives);
+            Assert.True(session.IsDriveMounted(2));
+            Assert.False(session.IsDriveMounted(0));
+            Assert.Equal(new byte[] { 0x40 }, session.Peek(0x4000, 1));
+        }
+
+        Assert.Equal(original, File.ReadAllBytes(image));
+
+        Cp500Command.Batch writer = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse([
+            "--rom", writeRom, "--hard-disk", image,
+        ]));
+        using (Cp500Session session = Cp500Files.Load(writer.Files))
+            Assert.Equal(2, session.InstalledDrives);
+
+        byte[] saved = File.ReadAllBytes(image);
+        Assert.Equal(0x56, saved[0]);
+        Assert.Equal(0xCB, saved[1]);
+        Assert.All(saved.AsSpan(256).ToArray(), value => Assert.Equal(0x5A, value));
+
+        byte[] locked = OneSector(0x11);
+        locked[7] = 0x80;
+        File.WriteAllBytes(image, locked);
+        using (Cp500Files.Load(writer.Files))
+        {
+        }
+
+        Assert.Equal(locked, File.ReadAllBytes(image));
+
+        File.WriteAllBytes(raw, Enumerable.Repeat((byte)0x11, 256).ToArray());
+        Cp500Command.Batch rawWriter = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse([
+            "--rom", writeRom, "--hard-disk", raw, "--chs", "1,1,1",
+        ]));
+        using (Cp500Files.Load(rawWriter.Files))
+        {
+        }
+
+        Assert.Equal(Enumerable.Repeat((byte)0x5A, 256).ToArray(), File.ReadAllBytes(raw));
+
+        File.WriteAllBytes(image, [0x56, 0xCB]);
+        Cp500Rejected bad = Assert.Throws<Cp500Rejected>(() => Cp500Files.Load(writer.Files));
+        Assert.Contains("not a valid image", bad.Message);
+
+        Cp500Command.Batch magicAndGeometry = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse([
+            "--rom", statusRom, "--hard-disk", image, "--chs", "1,1,1",
+        ]));
+        Cp500Rejected rejectedGeometry = Assert.Throws<Cp500Rejected>(() => Cp500Files.Load(magicAndGeometry.Files));
+        Assert.Contains("not a valid image", rejectedGeometry.Message);
+    }
+
+    [Fact]
     public void AnUnmappedCharacterIsExit2AndDoesNotChangeTheScreen()
     {
         using var dir = new TempRom();
@@ -308,6 +406,34 @@ public sealed class Cp500CommandTests
         Assert.Equal(before, session.ReadScreen());
         Assert.Equal(2, code);
     }
+
+    private static byte[] OneSector(byte marker)
+    {
+        var file = new byte[512];
+        file[0] = 0x56;
+        file[1] = 0xCB;
+        file[2] = 0x10;
+        file[26] = 1;
+        file[28] = 1;
+        file[29] = 1;
+        file[256] = marker;
+        return file;
+    }
+
+    private static readonly byte[] WriteSectorOf5A =
+    [
+        0xF3,
+        0x3E, 0x00,
+        0xD3, 0xCE,
+        0x3E, 0x30,
+        0xD3, 0xCF,
+        0x06, 0x00,
+        0x3E, 0x5A,
+        0x0E, 0xC8,
+        0xED, 0x79,
+        0x10, 0xFC,
+        0x18, 0xFE,
+    ];
 
     private sealed class TempRom : IDisposable
     {

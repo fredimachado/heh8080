@@ -50,6 +50,22 @@ public partial class ConfigDialog : Window
         UpdateSpeedSelection();
         UpdateRs232Selection();
         UpdateDriveLabels();
+        UpdateHardDiskSelection();
+    }
+
+    /// <summary>Sets the checkbox from the live profile. The mount row is enabled only when that flag is on.</summary>
+    private void UpdateHardDiskSelection()
+    {
+        if (_viewModel == null)
+            return;
+
+        bool installed = _viewModel.Cp500HardDiskInstalled;
+        HardDiskInstalled.IsChecked = installed;
+        HardDiskInstalled.IsEnabled = _viewModel.IsCp500;
+        HardDiskLabel.IsEnabled = installed;
+        MountHardDiskButton.IsEnabled = installed;
+        EjectHardDiskButton.IsEnabled = installed;
+        HardDiskLabel.Text = _viewModel.HardDiskName ?? "(empty)";
     }
 
     private void UpdateRs232Selection()
@@ -117,6 +133,78 @@ public partial class ConfigDialog : Window
     private async void MountB_Click(object? sender, RoutedEventArgs e) => await MountDisk(1);
     private async void MountC_Click(object? sender, RoutedEventArgs e) => await MountDisk(2);
     private async void MountD_Click(object? sender, RoutedEventArgs e) => await MountDisk(3);
+
+    private async void MountHardDisk_Click(object? sender, RoutedEventArgs e) => await MountHardDisk();
+
+    private async void EjectHardDisk_Click(object? sender, RoutedEventArgs e) => await EjectHardDisk();
+
+    private async void HardDisk_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel == null || !_viewModel.IsCp500)
+            return;
+
+        try
+        {
+            await _viewModel.SetCp500HardDisk(HardDiskInstalled.IsChecked == true);
+            StatusLabel.Text = _viewModel.StatusText;
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = ex.Message;
+            StatusLabel.Text = ex.Message;
+        }
+
+        UpdateHardDiskSelection();
+    }
+
+    private async Task MountHardDisk()
+    {
+        if (_viewModel == null || !_viewModel.IsCp500)
+            return;
+
+        var files = await StorageProvider.OpenFilePickerAsync(new FilePickerOpenOptions
+        {
+            Title = "Insert Hard Disk Image",
+            AllowMultiple = false,
+            FileTypeFilter =
+            [
+                new("Hard Disk Images") { Patterns = ["*.hdv", "*.img"] },
+                new("All Files") { Patterns = ["*"] }
+            ]
+        });
+
+        if (files.Count == 0)
+            return;
+
+        string path = files[0].Path.LocalPath;
+        try
+        {
+            byte[] image = await File.ReadAllBytesAsync(path);
+            bool readOnly = new FileInfo(path).IsReadOnly;
+            await _viewModel.MountCp500HardDisk(
+                image,
+                Path.GetFileName(path),
+                saved => SaveAtomically(path, saved),
+                readOnly);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            _viewModel.StatusText = ex.Message;
+        }
+
+        UpdateHardDiskSelection();
+        StatusLabel.Text = _viewModel.StatusText;
+    }
+
+    private async Task EjectHardDisk()
+    {
+        if (_viewModel == null)
+            return;
+
+        await _viewModel.EjectCp500HardDisk();
+        UpdateHardDiskSelection();
+        StatusLabel.Text = _viewModel.StatusText;
+    }
 
     private async void UnmountA_Click(object? sender, RoutedEventArgs e) => await UnmountDisk(0);
     private async void UnmountB_Click(object? sender, RoutedEventArgs e) => await UnmountDisk(1);

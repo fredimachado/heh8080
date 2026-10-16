@@ -1,16 +1,18 @@
 # CP-500 Expansion Hardware Plan
 
-Status: the headless host in section 0 and the RS-232 board in section 1 are
-implemented. The virtual hard disk and the network card are still planned.
+Status: the headless host in section 0, the RS-232 board in section 1, and
+the virtual hard disk in section 2 are implemented. The network card is still
+planned.
 
 This plan drives the hardware side of
 [cp500-os](https://github.com/fredimachado/cp500-os) (design in its
 `docs/design.md`, section 9), but every device models real hardware so other
 TRS-80 software can use it too.
 
-Port numbers and register layouts below come from memory of the Model III
-technical reference, FreHD and the WIZnet W5100 datasheet. Verify each against
-MAME `trs80m3` and the datasheets before implementing.
+Section 2 was checked against FreHD firmware, xtrs, sdltrs, and the WD1001
+manual. MAME `trs80m3.cpp` documents `C0h`-`CFh` and does not decode them, so
+it is not the source for this board. Section 3 is still from memory of the
+W5100 datasheet. Verify it before implementing.
 
 ## Principles
 
@@ -145,33 +147,74 @@ cp500-os has to program this map, not the earlier draft:
 
 ## 2. Virtual hard disk
 
-Model the Radio Shack hard disk interface (WD1010 controller), which is what
-FreHD implements on real Model III machines with an SD card. Software written
-for it (LDOS, NEWDOS hard disk drivers, cp500-os) then works in the emulator
-and on real hardware.
+Implemented. Verified against FreHD firmware, xtrs, sdltrs, and the WD1001
+OEM manual (Feb 1983). MAME `trs80m3.cpp` documents `C0h`-`CFh` and does not
+decode them, so it is not the source for this board. The board is the FreHD
+Model III hard disk. It presents a WD1010 task file at `C8h`-`CFh` and its
+own extra registers at `C0h`-`C7h`.
 
-| Port | Function |
-|------|----------|
-| `C0h`-`C1h` | Interface control and write protect status |
-| `C8h` | Data |
-| `C9h` | Error (IN) / write precompensation (OUT) |
-| `CAh` | Sector count |
-| `CBh` | Sector number |
-| `CCh`-`CDh` | Cylinder low / high |
-| `CEh` | Size/drive/head |
-| `CFh` | Status (IN) / command (OUT) |
+With the expansion off, `C0h`-`CFh` stay unregistered and read `FFh`.
 
-- 256-byte sectors, commands restore, seek, read sector, write sector, format
-  track. Transfers are programmed IO with DRQ, like the WD1791 path.
-- Image: raw sectors plus a geometry (cylinders, heads, sectors per track)
-  stored in a small header. Import and export of the `.hdv` format used by
-  xtrs, sdltrs and FreHD, so existing images work.
-- `Cp500DriveBay` grows a hard disk slot with the same insert, eject and
-  write-back policy as floppies.
-- Clock: FreHD also exposes a battery-backed real-time clock on extra
-  registers in this range. Model it, backed by an `IClock` host interface
-  (tests use a fixed clock). Confirm the exact registers from the FreHD
-  documentation.
+While a command is busy, every read returns the status byte and every write
+is ignored. That is FreHD `handle_busy`, and it matches WD1001 section 5.5.7.
+
+| Port | IN | OUT |
+|------|----|-----|
+| `C0h` | Write protect. Bits 7-4 are drives 0-3. Bit 1 is set when any present drive is protected. Bit 0 is defined as interrupt and stays 0. | Ignored. |
+| `C1h` | Control byte last written. | Bit 4 software reset, bit 3 device enable, bit 2 wait enable. |
+| `C2h` | Extra data. The clock bytes are read here. | Extra data. The set-time bytes are written here. |
+| `C3h` | Extra size, low byte. A stored 0 means 256. | Extra size. |
+| `C4h` | One byte from the boot ROM stream. | Extra command. The low nibble runs. `01h` reads the clock. `02h` sets it. |
+| `C5h` | Extra error. | Boot-ROM address. |
+| `C6h`-`C7h` | `FFh`. UART stubs, not implemented. | Ignored. |
+| `C8h` | Next byte of the sector buffer. | Next byte of the sector buffer. Accepted only during a write command. |
+| `C9h` | Error register. | Write precompensation. Stored and otherwise ignored. |
+| `CAh` | Sector count. | Sector count. |
+| `CBh` | Sector number. | Sector number. |
+| `CCh` | Cylinder low. | Cylinder low. |
+| `CDh` | Cylinder high, bits 1-0. The upper bits read 0. | Cylinder high. Only bits 1-0 are kept. |
+| `CEh` | Size, drive, and head, packed back into the SDH shape. | `essddhhh`. Bit 7 ECC, ignored. Bits 6-5 size. Bits 4-3 drive. Bits 2-0 head. The write sets ready and seek complete. |
+| `CFh` | Status. | Command. Only the high nibble selects the command. |
+
+Size codes in `CEh` bits 6-5 are `00` = 256, `01` = 512, `10` = 1024, `11` = 128. cp500-os and TRS-DOS use `00`. This phase transfers 256-byte sectors. Any other size code aborts the command.
+
+One hard-disk slot is drive 0. A command that selects drive 1, 2, or 3 behaves as a missing disk. The slot does not change `InstalledDrives` or the WD1791.
+
+Command high nibbles:
+
+| Nibble | Command | This phase |
+|--------|---------|------------|
+| `1` | Restore | Clears the cylinder. The step-rate field is ignored. |
+| `2` | Read sector | Loads one 256-byte sector into the buffer. |
+| `3` | Write sector | Accepts one 256-byte sector. The multi-sector bit (`04h`) aborts. |
+| `4` | Verify | Succeeds when the sector exists. |
+| `5` | Format track | No-op success, matching FreHD. It does not write the track. |
+| `6` | Init | No-op success, matching FreHD. |
+| `7` | Seek | Sets the cylinder from the task file. |
+| `9` | Test | Clears the error register and leaves ready set. FreHD only. |
+
+Status bits are busy `80h`, ready `40h`, write fault `20h`, seek complete `10h`, data request `08h`, corrected `04h`, command in progress `02h`, error `01h`. Error bits used here are uncorrectable `40h`, ID not found `10h`, aborted command `04h`.
+
+DRQ means the whole sector buffer is ready. It clears on the access that takes or stores the last byte. Software polls busy and then moves 256 bytes. `AdvanceCycles` can hold busy for a programmed number of CPU cycles. The machine default is immediate, the same way `Wd1791Timing` leaves the command delay at 0. A test can set a non-zero delay.
+
+A missing image leaves status at ready (`40h`) after reset. A sector command then sets ID not found (`10h`). A read-only image sets the drive-0 bit in `C0h` and refuses a write with aborted command (`04h`). The image is not modified. Read-only is the host flag or header byte 7 bit 7.
+
+The in-memory image is a geometry plus 256-byte sectors. On disk, `.hdv` is a 256-byte header and then the raw sectors. Magic is `56h CBh`. Byte 2 is the version (`10h` or `11h`). Byte 7 bit 7 is write protect. Byte 29 is sectors per cylinder, and 0 means 256. There is no separate sector-size field.
+
+Import accepts the two layouts that real images use:
+
+- Heads byte 26 is 0. Classic xtrs. Sectors per track are 32. Heads are byte 29 divided by 32. Cylinders are byte 28, and 0 means 256. Byte 27 is ignored.
+- Heads byte 26 is 1 through 8. FreHD. Cylinders are `(byte 27 & 3) << 8 | byte 28`. Sectors per track are byte 29 divided by the head count.
+
+Export writes the FreHD layout, which is what the firmware on a real machine reads. A truncated body, a bad magic, a version other than `10h` or `11h`, or a geometry that does not divide is rejected and the slot is left untouched. A raw image is the sector body only. The caller passes the geometry. Write-back uses the format the image was loaded from.
+
+The sector at cylinder 0, head 0, sector 0 is file offset 256. That sector is cp500-os block 0, the partition table. A tool that writes the table at file offset 0 is not an `.hdv` image.
+
+The clock is not a WD1010 register. The guest writes `01h` to `C4h`, polls `CFh` until bit 7 clears, then reads six binary bytes from `C2h`. The order is seconds, minutes, hours, year since 2000, day, month. Command `02h` followed by six bytes written to `C2h` sets the clock. `IClock` supplies the time. The desktop and the runner use the host wall clock. Tests pass a fixed clock. The value is not BCD and it is not seconds since 1980.
+
+cp500-os keeps 256-byte blocks and the partition table in block 0. Its clock reader has to issue this sequence and convert the six bytes into seconds since 1980-01-01. Year 12 means 2012.
+
+`Cp500DriveBay` grows one hard-disk slot with the same insert, eject, and write-back rule as a floppy. Parse first. A bad image leaves the slot alone. A modified writable image is written on eject, replace, and shutdown. A read-only image is never written. A failed save leaves the image mounted.
 
 ## 3. Network card
 
@@ -202,7 +245,7 @@ which here means the host.
 
 1. Headless runner and MCP tools. Done. See section 0.
 2. RS-232 board with TCP, Hayes, and COM. Done. See section 1.
-3. Virtual hard disk with clock.
+3. Virtual hard disk with clock. Done. See section 2.
 4. Network card.
 
 Each remaining hardware step: device unit tests against the register contract, a machine-level

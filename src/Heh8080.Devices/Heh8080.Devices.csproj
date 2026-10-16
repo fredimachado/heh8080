@@ -10,4 +10,8 @@
   <ItemGroup>
     <ProjectReference Include="..\Heh8080.Core\Heh8080.Core.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Heh8080.Tests" />
+  </ItemGroup>
 </Project>

@@ -24,8 +24,11 @@ public readonly record struct Cp500BatchResult(bool Matched, string Screen);
 /// <summary>A disk flag before the file is read.</summary>
 public readonly record struct Cp500DiskFile(int Drive, string Path);
 
+/// <summary>A hard-disk path before the file is read. Geometry is set only for a raw body.</summary>
+public readonly record struct Cp500HardDiskFile(string Path, HardDiskGeometry? RawGeometry);
+
 /// <summary>Paths only. No bytes, no machine.</summary>
-public sealed record Cp500Files(string RomPath, IReadOnlyList<Cp500DiskFile> Disks)
+public sealed record Cp500Files(string RomPath, IReadOnlyList<Cp500DiskFile> Disks, Cp500HardDiskFile? HardDisk = null)
 {
     public static Cp500Session Load(Cp500Files files, Rs232Attachment rs232 = default)
     {
@@ -39,7 +42,20 @@ public sealed record Cp500Files(string RomPath, IReadOnlyList<Cp500DiskFile> Dis
             media.Set(disk.Drive, new Cp500Disk(image, Path.GetFileName(path), bytes => File.WriteAllBytes(path, bytes)));
         }
 
-        return Cp500Session.Create(rom, media, rs232);
+        Cp500HardDisk? hardDisk = null;
+        IClock? clock = null;
+        if (files.HardDisk is { } file)
+        {
+            string path = file.Path;
+            hardDisk = new Cp500HardDisk(
+                ReadRequired(path, "Hard disk"),
+                Path.GetFileName(path),
+                bytes => File.WriteAllBytes(path, bytes),
+                file.RawGeometry);
+            clock = new OffsetClock(() => DateTime.Now);
+        }
+
+        return Cp500Session.Create(rom, media, rs232, hardDisk, clock);
     }
 
     private static byte[] ReadRequired(string path, string kind)
@@ -62,8 +78,8 @@ public abstract record Cp500Command
 {
     public const string Usage =
         """
-        heh8080-cp500 --rom <path> [--disk0 <path>] [--disk1 <path>] [--disk2 <path>] [--disk3 <path>] [--rs232 <link>] [--type <text>] [--until-screen <text> --timeout <Ns|Nms>] [--dump-screen]
-        heh8080-cp500 --mcp --rom <path> [--disk0 <path>] [--disk1 <path>] [--disk2 <path>] [--disk3 <path>] [--rs232 <link>]
+        heh8080-cp500 --rom <path> [--disk0 <path>] [--disk1 <path>] [--disk2 <path>] [--disk3 <path>] [--hard-disk <path>] [--chs <cylinders>,<heads>,<sectors>] [--rs232 <link>] [--type <text>] [--until-screen <text> --timeout <Ns|Nms>] [--dump-screen]
+        heh8080-cp500 --mcp --rom <path> [--disk0 <path>] [--disk1 <path>] [--disk2 <path>] [--disk3 <path>] [--hard-disk <path>] [--chs <cylinders>,<heads>,<sectors>] [--rs232 <link>]
         """;
 
     private Cp500Command()
@@ -121,6 +137,8 @@ public abstract record Cp500Command
         bool dump = false;
         bool mcp = false;
         string? rs232 = null;
+        string? hardDisk = null;
+        HardDiskGeometry? chs = null;
         var disks = new List<Cp500DiskFile>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
@@ -167,6 +185,14 @@ public abstract record Cp500Command
                     RequireOnce(seen, token);
                     rs232 = TakeValue(args, ref i, token);
                     break;
+                case "--hard-disk":
+                    RequireOnce(seen, token);
+                    hardDisk = TakeValue(args, ref i, token);
+                    break;
+                case "--chs":
+                    RequireOnce(seen, token);
+                    chs = ParseGeometry(TakeValue(args, ref i, token));
+                    break;
                 default:
                     throw new Cp500Rejected($"Unknown argument '{token}'.");
             }
@@ -178,7 +204,13 @@ public abstract record Cp500Command
         if (mcp && (type is not null || until is not null || timeout is not null || dump))
             throw new Cp500Rejected("--mcp cannot be combined with --type, --until-screen, --timeout, or --dump-screen.");
 
-        var files = new Cp500Files(rom, disks);
+        if (chs is not null && hardDisk is null)
+            throw new Cp500Rejected("--chs requires --hard-disk.");
+
+        var files = new Cp500Files(
+            rom,
+            disks,
+            hardDisk is null ? null : new Cp500HardDiskFile(hardDisk, chs));
         Rs232Link link = ParseLink(rs232);
         if (mcp)
             return new Serve(files, link);
@@ -216,6 +248,27 @@ public abstract record Cp500Command
 
         index++;
         return args[index];
+    }
+
+    private static HardDiskGeometry ParseGeometry(string text)
+    {
+        string[] parts = text.Split(',');
+        if (parts.Length != 3
+            || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int cylinders)
+            || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int heads)
+            || !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out int sectors))
+        {
+            throw new Cp500Rejected("--chs needs <cylinders>,<heads>,<sectors>.");
+        }
+
+        try
+        {
+            return new HardDiskGeometry(cylinders, heads, sectors);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw new Cp500Rejected("--chs needs cylinders 1-1023, heads 1-8, and sectors 1-256.");
+        }
     }
 
     private static bool TryDiskFlag(string token, out int drive)
