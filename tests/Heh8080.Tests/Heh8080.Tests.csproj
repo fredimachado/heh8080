@@ -22,6 +22,7 @@
     <ProjectReference Include="..\..\src\Heh8080.Core\Heh8080.Core.csproj" />
     <ProjectReference Include="..\..\src\Heh8080.Cp500Runner\Heh8080.Cp500Runner.csproj" />
     <ProjectReference Include="..\..\src\Heh8080.Devices\Heh8080.Devices.csproj" />
+    <ProjectReference Include="..\..\src\Heh8080.Rs232\Heh8080.Rs232.csproj" />
     <ProjectReference Include="..\..\src\Heh8080.Terminal\Heh8080.Terminal.csproj" />
   </ItemGroup>
 </Project>
