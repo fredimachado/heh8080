@@ -24,6 +24,24 @@ internal static class Cp500TestRoms
         return WithData(program, Encoding.Latin1.GetBytes(text));
     }
 
+    /// <summary>Waits until any key of keyboard row 0 (@, A-G) is down, then prints <paramref name="text"/> at the top left and spins.</summary>
+    public static byte[] PrintingAfterAKey(string text)
+    {
+        byte[] program =
+        [
+            0xF3,                                      // DI
+            0x3A, 0x01, 0x38,                          // loop: LD A,(3801h)
+            0xB7,                                      // OR A
+            0x28, 0xFA,                                // JR Z,loop
+            0x21, DataOffset & 0xFF, DataOffset >> 8,  // LD HL,data
+            0x11, 0x00, 0x3C,                          // LD DE,3C00h
+            0x01, (byte)text.Length, 0x00,             // LD BC,length
+            0xED, 0xB0,                                // LDIR
+            0x18, 0xFE                                 // JR $
+        ];
+        return WithData(program, Encoding.Latin1.GetBytes(text));
+    }
+
     /// <summary>Spins forever without touching the screen.</summary>
     public static byte[] Spinning() => [0x18, 0xFE]; // JR $
 
