@@ -21,6 +21,7 @@ internal static class CommandLine
         Machine:
           --rom <path>              System ROM image (required).
           --disk0 .. --disk3 <path> Disk image for a drive: raw, JV3 or DMK.
+          --rs232 <link>            off | tcp:<host>:<port> | listen:<port> | hayes:<port> | com:<name>.
           --write-back              At exit, save modified disks to their files in their own format.
           --timeout <duration>      Emulated time each --until-screen may take (default 30s).
 
@@ -52,6 +53,7 @@ internal static class CommandLine
         var disks = new DiskOption?[MaxDrives];
         bool writeBack = false;
         bool dumpScreen = false;
+        Rs232Link? rs232 = null;
         TimeSpan? timeout = null;
         var dumps = new List<MemoryRange>();
         var steps = new List<RunnerStep>();
@@ -68,6 +70,9 @@ internal static class CommandLine
                     break;
                 case "--write-back":
                     writeBack = true;
+                    break;
+                case "--rs232":
+                    rs232 = Once(rs232, option, ParseLink(Value(args, ref i)));
                     break;
                 case "--dump-screen":
                     dumpScreen = true;
@@ -104,7 +109,8 @@ internal static class CommandLine
             timeout ?? DefaultTimeout,
             dumpScreen,
             dumps,
-            steps);
+            steps,
+            rs232 ?? Rs232Link.Off);
     }
 
     /// <summary>Parses 500ms, 30s, 2m or 1.5s into a positive duration of at most a day.</summary>
@@ -129,6 +135,18 @@ internal static class CommandLine
             throw new UsageException($"{option} must be more than zero and at most a day, not '{text}'.");
 
         return duration;
+    }
+
+    private static Rs232Link ParseLink(string text)
+    {
+        try
+        {
+            return Rs232Link.Parse(text);
+        }
+        catch (FormatException ex)
+        {
+            throw new UsageException(ex.Message);
+        }
     }
 
     private static UntilScreenStep ParseUntilScreen(string text) =>

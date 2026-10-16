@@ -12,5 +12,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Heh8080.Devices\Heh8080.Devices.csproj" />
+    <ProjectReference Include="..\Heh8080.Rs232\Heh8080.Rs232.csproj" />
   </ItemGroup>
 </Project>

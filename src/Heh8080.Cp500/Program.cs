@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.Text;
 using Heh8080.Cp500Host;
+using Heh8080.Devices;
 using Heh8080.Mcp;
+using Heh8080.Rs232;
 
 namespace Heh8080.Cp500;
 
@@ -21,28 +23,51 @@ public static class Program
             Console.Error.WriteLine(ex.Message);
             return Cp500Exit.Rejected;
         }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return Cp500Exit.Rejected;
+        }
     }
 
     private static int Dispatch(Cp500Command command, Stream stdout)
     {
-        switch (command)
+        (Rs232Link link, Cp500Files files) = command switch
         {
-            case Cp500Command.Batch batch:
+            Cp500Command.Batch batch => (batch.Rs232, batch.Files),
+            Cp500Command.Serve serve => (serve.Rs232, serve.Files),
+            _ => throw new UnreachableException(command.GetType().FullName),
+        };
+        Rs232Attachment cable = Rs232Endpoint.Open(link, Cp500MachineProfile.Original.ClockHz);
+
+        Cp500Session session;
+        try
+        {
+            session = Cp500Files.Load(files, cable);
+        }
+        catch
+        {
+            cable.Endpoint?.Dispose();
+            throw;
+        }
+
+        using (session)
+        {
+            switch (command)
             {
-                using Cp500Session session = Cp500Files.Load(batch.Files);
-                Cp500BatchResult result = batch.Run(session);
-                if (batch.Dump)
-                    stdout.Write(Encoding.UTF8.GetBytes(result.Screen));
-                return Cp500Exit.For(result);
+                case Cp500Command.Batch batch:
+                {
+                    Cp500BatchResult result = batch.Run(session);
+                    if (batch.Dump)
+                        stdout.Write(Encoding.UTF8.GetBytes(result.Screen));
+                    return Cp500Exit.For(result);
+                }
+                case Cp500Command.Serve:
+                    Cp500McpHost.RunAsync(session).GetAwaiter().GetResult();
+                    return Cp500Exit.Success;
+                default:
+                    throw new UnreachableException(command.GetType().FullName);
             }
-            case Cp500Command.Serve serve:
-            {
-                using Cp500Session session = Cp500Files.Load(serve.Files);
-                Cp500McpHost.RunAsync(session).GetAwaiter().GetResult();
-                return Cp500Exit.Success;
-            }
-            default:
-                throw new UnreachableException(command.GetType().FullName);
         }
     }
 }

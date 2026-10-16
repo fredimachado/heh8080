@@ -135,24 +135,26 @@ public sealed class Cp500Session : IDisposable
     private readonly Lock _gate = new();
     private readonly Cp500Machine _machine;
     private readonly Cp500DriveBay _bay;
+    private readonly ISerialEndpoint? _endpoint;
     private bool _disposed;
 
-    private Cp500Session(ReadOnlyMemory<byte> rom, Cp500Media media)
+    private Cp500Session(ReadOnlyMemory<byte> rom, Cp500Media media, Rs232Attachment rs232)
     {
         ArgumentNullException.ThrowIfNull(media);
         if (rom.Length == 0 || rom.Length > Cp500MachineProfile.SystemRomSizeBytes)
             throw new Cp500Rejected(
                 $"ROM must be 1 through {Cp500MachineProfile.SystemRomSizeBytes} bytes.");
 
-        var profile = new Cp500MachineProfile(
+        var profile = rs232.Apply(new Cp500MachineProfile(
             Cp500MachineProfile.Original.RamSizeKiB,
             media.InstalledDrives)
         {
             ClockHz = Cp500MachineProfile.Original.ClockHz
-        };
+        });
 
+        _endpoint = rs232.Endpoint;
         _bay = new Cp500DriveBay();
-        _machine = new Cp500Machine(profile, rom.Span, _bay.Images);
+        _machine = new Cp500Machine(profile, rom.Span, _bay.Images, serial: rs232);
         for (int drive = 0; drive < ModelIIIDiskGeometry.MaxDrives; drive++)
         {
             if (media.Get(drive) is not { } disk)
@@ -172,9 +174,9 @@ public sealed class Cp500Session : IDisposable
     }
 
     /// <summary>Inserts disks, sets infinite speed, then <see cref="Boot"/>.</summary>
-    public static Cp500Session Create(ReadOnlyMemory<byte> rom, Cp500Media media)
+    public static Cp500Session Create(ReadOnlyMemory<byte> rom, Cp500Media media, Rs232Attachment rs232 = default)
     {
-        var session = new Cp500Session(rom, media);
+        var session = new Cp500Session(rom, media, rs232);
         session.Boot();
         return session;
     }
@@ -344,8 +346,11 @@ public sealed class Cp500Session : IDisposable
             }
             catch (Exception ex)
             {
+                _endpoint?.Dispose();
                 throw new Cp500Rejected($"Disk flush failed: {ex.Message}");
             }
+
+            _endpoint?.Dispose();
         }
     }
 

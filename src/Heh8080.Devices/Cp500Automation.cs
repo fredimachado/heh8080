@@ -30,10 +30,14 @@ public sealed class Cp500Automation
     /// installed and drive 0 is empty, it resets holding BREAK, so the stock ROM offers BASIC instead of waiting
     /// for a diskette.
     /// </summary>
-    public Cp500Automation(ReadOnlySpan<byte> systemRom, Cp500DriveBay? drives = null, Cp500MachineProfile? profile = null)
+    public Cp500Automation(
+        ReadOnlySpan<byte> systemRom,
+        Cp500DriveBay? drives = null,
+        Cp500MachineProfile? profile = null,
+        Rs232Attachment rs232 = default)
     {
         Drives = drives ?? new Cp500DriveBay();
-        Machine = new Cp500Machine(profile ?? Cp500MachineProfile.Original, systemRom, Drives.Images);
+        Machine = new Cp500Machine(profile ?? Cp500MachineProfile.Original, systemRom, Drives.Images, serial: rs232);
         if (Machine.Profile.InstalledDrives > 0 && !Drives.Images.IsMounted(0))
             Machine.ResetHoldingBreak();
     }

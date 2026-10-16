@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Text;
 using Heh8080.Devices;
+using Heh8080.Rs232;
 
 namespace Heh8080.Cp500Runner;
 
@@ -60,19 +61,27 @@ public static class RunnerCommand
 
     private static RunnerExitCode Run(RunMachine run, TextWriter stdout, TextWriter stderr)
     {
-        Cp500Automation automation = Boot(run);
-        RunnerExitCode result = RunSteps(automation, run, stderr);
+        Rs232Attachment cable = Rs232Endpoint.Open(run.Rs232, Cp500MachineProfile.Original.ClockHz);
+        try
+        {
+            Cp500Automation automation = Boot(run, cable);
+            RunnerExitCode result = RunSteps(automation, run, stderr);
 
-        automation.Drives.Flush();
-        if (run.DumpScreen)
-            stdout.WriteLine(automation.ReadScreenText());
-        foreach (MemoryRange range in run.DumpMemory)
-            WriteHexDump(stdout, range.Address, automation.ReadMemory(range.Address, range.Length));
+            automation.Drives.Flush();
+            if (run.DumpScreen)
+                stdout.WriteLine(automation.ReadScreenText());
+            foreach (MemoryRange range in run.DumpMemory)
+                WriteHexDump(stdout, range.Address, automation.ReadMemory(range.Address, range.Length));
 
-        return result;
+            return result;
+        }
+        finally
+        {
+            cable.Endpoint?.Dispose();
+        }
     }
 
-    private static Cp500Automation Boot(RunMachine run)
+    private static Cp500Automation Boot(RunMachine run, Rs232Attachment cable)
     {
         byte[] rom = ReadFile("ROM", run.RomPath);
         if (rom.Length == 0)
@@ -94,7 +103,7 @@ public static class RunnerCommand
             }
         }
 
-        return new Cp500Automation(rom, drives);
+        return new Cp500Automation(rom, drives, cable.Apply(Cp500MachineProfile.Original), cable);
     }
 
     private static RunnerExitCode RunSteps(Cp500Automation automation, RunMachine run, TextWriter stderr)

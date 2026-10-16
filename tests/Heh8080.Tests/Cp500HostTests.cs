@@ -237,6 +237,32 @@ public sealed class Cp500CommandTests
     }
 
     [Fact]
+    public void Rs232IsOptionalAndABadLinkIsRejected()
+    {
+        Cp500Command.Batch plain = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse(["--rom", "stub.rom"]));
+        Assert.Same(Rs232Link.Off, plain.Rs232);
+
+        Cp500Command.Batch tcp = Assert.IsType<Cp500Command.Batch>(Cp500Command.Parse([
+            "--rom", "stub.rom",
+            "--rs232", "tcp:Printer.local:2323",
+        ]));
+        Assert.Equal("Printer.local", Assert.IsType<Rs232Link.TcpLink>(tcp.Rs232).Host);
+
+        Cp500Command.Serve serve = Assert.IsType<Cp500Command.Serve>(Cp500Command.Parse([
+            "--mcp", "--rom", "stub.rom", "--rs232", "com:COM3",
+        ]));
+        Assert.Equal("COM3", Assert.IsType<Rs232Link.ComLink>(serve.Rs232).Name);
+
+        Cp500Rejected bad = Assert.Throws<Cp500Rejected>(() =>
+            Cp500Command.Parse(["--rom", "stub.rom", "--rs232", "tcp:a:b:1"]));
+        Assert.Contains(Rs232Link.Syntax, bad.Message);
+
+        Cp500Rejected duplicate = Assert.Throws<Cp500Rejected>(() =>
+            Cp500Command.Parse(["--rom", "stub.rom", "--rs232", "off", "--rs232", "off"]));
+        Assert.Equal("Duplicate flag --rs232.", duplicate.Message);
+    }
+
+    [Fact]
     public void UntilScreenWithoutTimeoutIsRejected()
     {
         Cp500Rejected ex = Assert.Throws<Cp500Rejected>(() =>

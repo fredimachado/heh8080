@@ -27,7 +27,7 @@ public readonly record struct Cp500DiskFile(int Drive, string Path);
 /// <summary>Paths only. No bytes, no machine.</summary>
 public sealed record Cp500Files(string RomPath, IReadOnlyList<Cp500DiskFile> Disks)
 {
-    public static Cp500Session Load(Cp500Files files)
+    public static Cp500Session Load(Cp500Files files, Rs232Attachment rs232 = default)
     {
         ArgumentNullException.ThrowIfNull(files);
         byte[] rom = ReadRequired(files.RomPath, "ROM");
@@ -39,7 +39,7 @@ public sealed record Cp500Files(string RomPath, IReadOnlyList<Cp500DiskFile> Dis
             media.Set(disk.Drive, new Cp500Disk(image, Path.GetFileName(path), bytes => File.WriteAllBytes(path, bytes)));
         }
 
-        return Cp500Session.Create(rom, media);
+        return Cp500Session.Create(rom, media, rs232);
     }
 
     private static byte[] ReadRequired(string path, string kind)
@@ -62,8 +62,8 @@ public abstract record Cp500Command
 {
     public const string Usage =
         """
-        heh8080-cp500 --rom <path> [--disk0 <path>] [--disk1 <path>] [--disk2 <path>] [--disk3 <path>] [--type <text>] [--until-screen <text> --timeout <Ns|Nms>] [--dump-screen]
-        heh8080-cp500 --mcp --rom <path> [--disk0 <path>] [--disk1 <path>] [--disk2 <path>] [--disk3 <path>]
+        heh8080-cp500 --rom <path> [--disk0 <path>] [--disk1 <path>] [--disk2 <path>] [--disk3 <path>] [--rs232 <link>] [--type <text>] [--until-screen <text> --timeout <Ns|Nms>] [--dump-screen]
+        heh8080-cp500 --mcp --rom <path> [--disk0 <path>] [--disk1 <path>] [--disk2 <path>] [--disk3 <path>] [--rs232 <link>]
         """;
 
     private Cp500Command()
@@ -78,7 +78,9 @@ public abstract record Cp500Command
         public EmulatedTime? Timeout { get; }
         public bool Dump { get; }
 
-        public Batch(Cp500Files files, string? typeText, ScreenText? until, EmulatedTime? timeout, bool dump)
+        public Rs232Link Rs232 { get; }
+
+        public Batch(Cp500Files files, string? typeText, ScreenText? until, EmulatedTime? timeout, bool dump, Rs232Link rs232)
         {
             if ((until is null) != (timeout is null))
                 throw new Cp500Rejected("--until-screen and --timeout must be passed together.");
@@ -88,6 +90,7 @@ public abstract record Cp500Command
             Until = until;
             Timeout = timeout;
             Dump = dump;
+            Rs232 = rs232;
         }
 
         public Cp500BatchResult Run(Cp500Session session)
@@ -103,7 +106,7 @@ public abstract record Cp500Command
         }
     }
 
-    public sealed record Serve(Cp500Files Files) : Cp500Command;
+    public sealed record Serve(Cp500Files Files, Rs232Link Rs232) : Cp500Command;
 
     public static Cp500Command Parse(string[] args)
     {
@@ -117,6 +120,7 @@ public abstract record Cp500Command
         string? timeout = null;
         bool dump = false;
         bool mcp = false;
+        string? rs232 = null;
         var disks = new List<Cp500DiskFile>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
@@ -159,6 +163,10 @@ public abstract record Cp500Command
                     RequireOnce(seen, token);
                     timeout = TakeValue(args, ref i, token);
                     break;
+                case "--rs232":
+                    RequireOnce(seen, token);
+                    rs232 = TakeValue(args, ref i, token);
+                    break;
                 default:
                     throw new Cp500Rejected($"Unknown argument '{token}'.");
             }
@@ -171,12 +179,28 @@ public abstract record Cp500Command
             throw new Cp500Rejected("--mcp cannot be combined with --type, --until-screen, --timeout, or --dump-screen.");
 
         var files = new Cp500Files(rom, disks);
+        Rs232Link link = ParseLink(rs232);
         if (mcp)
-            return new Serve(files);
+            return new Serve(files, link);
 
         ScreenText? untilText = until is null ? null : ScreenText.Parse(until);
         EmulatedTime? timeoutTime = timeout is null ? null : EmulatedTime.Parse(timeout, Cp500MachineProfile.Original.ClockHz);
-        return new Batch(files, type, untilText, timeoutTime, dump);
+        return new Batch(files, type, untilText, timeoutTime, dump, link);
+    }
+
+    private static Rs232Link ParseLink(string? text)
+    {
+        if (text is null)
+            return Rs232Link.Off;
+
+        try
+        {
+            return Rs232Link.Parse(text);
+        }
+        catch (FormatException ex)
+        {
+            throw new Cp500Rejected(ex.Message);
+        }
     }
 
     private static void RequireOnce(HashSet<string> seen, string flag)

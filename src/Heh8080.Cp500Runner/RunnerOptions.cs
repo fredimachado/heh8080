@@ -47,4 +47,5 @@ internal sealed record RunMachine(
     TimeSpan Timeout,
     bool DumpScreen,
     IReadOnlyList<MemoryRange> DumpMemory,
-    IReadOnlyList<RunnerStep> Steps) : ParsedCommandLine;
+    IReadOnlyList<RunnerStep> Steps,
+    Rs232Link Rs232) : ParsedCommandLine;

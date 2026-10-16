@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
 using System.Text;
 using Heh8080.Cp500Runner;
 using Heh8080.Devices;
@@ -110,6 +112,21 @@ public sealed class Cp500RunnerTests : IDisposable
         Assert.False(System.IO.File.Exists(disk + ".tmp"));
     }
 
+    [Fact]
+    public void ListenInstallsTheBoardTheRomCanRead()
+    {
+        var probe = new TcpListener(IPAddress.Loopback, 0);
+        probe.Start();
+        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+
+        string rom = File([0xDB, 0xE8, 0x32, 0x00, 0x40, 0x18, 0xFE]);
+        var result = Run("--rom", rom, "--rs232", $"listen:{port}", "--run", "50ms", "--dump-memory", "4000:1");
+
+        Assert.Equal(RunnerExitCode.Success, result.ExitCode);
+        Assert.Contains("4000: 02", result.Stdout);
+    }
+
     [Theory]
     [InlineData(new string[0], "--rom is required.")]
     [InlineData(new[] { "--dump-screen" }, "--rom is required.")]
@@ -128,6 +145,8 @@ public sealed class Cp500RunnerTests : IDisposable
     [InlineData(new[] { "--rom", "a", "--type", "{F1}" }, "--type \"{F1}\": Unknown key '{F1}' at position 0; known keys: ENTER, CLEAR, BREAK, UP, DOWN, LEFT, RIGHT, SPACE.")]
     [InlineData(new[] { "--rom", "a", "--dump-memory", "4300" }, "--dump-memory needs <hex address>:<length>, such as 4300:256, not '4300'.")]
     [InlineData(new[] { "--rom", "a", "--dump-memory", "FFFF:2" }, "--dump-memory 'FFFF:2': the length must be 1 to 1 bytes from FFFFh.")]
+    [InlineData(new[] { "--rom", "a", "--rs232", "tcp:a:b:1" }, "RS-232 link must be off | tcp:<host>:<port> | listen:<port> | hayes:<port> | com:<name>.")]
+    [InlineData(new[] { "--rom", "a", "--rs232", "off", "--rs232", "listen:1" }, "--rs232 was given more than once.")]
     public void UsageErrorsExitWithTwoAndSayWhatIsWrong(string[] args, string message)
     {
         var result = Run(args);
