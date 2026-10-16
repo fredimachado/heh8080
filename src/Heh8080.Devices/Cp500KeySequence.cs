@@ -28,7 +28,8 @@ public readonly record struct Cp500KeyPress
 /// <summary>
 /// Parses text to type into key presses. Characters map through <see cref="Cp500KeyMap"/> with the SHIFT a desktop
 /// user would send: an upper-case letter is SHIFT plus the letter, a lower-case letter is the letter alone, and
-/// punctuation takes the SHIFT the TRS-80 keyboard needs. <c>\r</c> is ENTER and <c>\\</c> a backslash; braces name
+/// punctuation takes the SHIFT the TRS-80 keyboard needs. A carriage return character or the escape <c>\r</c> is
+/// ENTER, and <c>\\</c> a backslash (which no CP-500 key types, so it is rejected); braces name
 /// keys without a character: <c>{ENTER}</c>, <c>{CLEAR}</c>, <c>{BREAK}</c>, <c>{UP}</c>, <c>{DOWN}</c>,
 /// <c>{LEFT}</c>, <c>{RIGHT}</c> and <c>{SPACE}</c>, in any letter case.
 /// </summary>
@@ -63,6 +64,9 @@ public static class Cp500KeySequence
             {
                 case '\\':
                     keys.Add(Escape(text, ++i));
+                    break;
+                case '\r':
+                    keys.Add(Press(Cp500KeyMap.Map(Cp500HostKey.Enter), shift: false));
                     break;
                 case '{':
                     int close = text.IndexOf('}', i + 1);
@@ -108,7 +112,10 @@ public static class Cp500KeySequence
     private static Cp500KeyPress Character(char character, int position)
     {
         if (!Cp500KeyMap.TryMapCharacter(character, out Cp500KeyStroke stroke))
-            throw new FormatException($"The CP-500 keyboard has no key for '{character}' (position {position}).");
+        {
+            string shown = char.IsControl(character) ? $"U+{(int)character:X4}" : $"'{character}'";
+            throw new FormatException($"The CP-500 keyboard has no key for {shown} (position {position}).");
+        }
 
         bool shift = stroke.Shift switch
         {

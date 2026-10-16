@@ -25,7 +25,7 @@ public sealed class Cp500KeySequenceTests
     [Fact]
     public void BackslashRAndBracedNamesAreKeysWithoutCharacters()
     {
-        IReadOnlyList<Cp500KeyPress> keys = Cp500KeySequence.Parse(@"\r{ENTER}{clear}{BREAK}{UP}{DOWN}{LEFT}{RIGHT}{SPACE}");
+        IReadOnlyList<Cp500KeyPress> keys = Cp500KeySequence.Parse(@"\r{ENTER}{clear}{BREAK}{UP}{DOWN}{LEFT}{RIGHT}{SPACE}" + "\r");
 
         Assert.Equal(
             new[]
@@ -38,7 +38,8 @@ public sealed class Cp500KeySequenceTests
                 new Cp500KeyPress(6, 4, shift: false),
                 new Cp500KeyPress(6, 5, shift: false),
                 new Cp500KeyPress(6, 6, shift: false),
-                new Cp500KeyPress(6, 7, shift: false)
+                new Cp500KeyPress(6, 7, shift: false),
+                new Cp500KeyPress(6, 0, shift: false)
             },
             keys);
     }
@@ -50,6 +51,7 @@ public sealed class Cp500KeySequenceTests
     [InlineData("x{ENTER", "Unclosed '{' at position 1.")]
     [InlineData("a^", "The CP-500 keyboard has no key for '^' (position 1).")]
     [InlineData(@"\\", @"The CP-500 keyboard has no key for '\' (position 1).")]
+    [InlineData("a\n", "The CP-500 keyboard has no key for U+000A (position 1).")]
     public void RejectsTextTheKeyboardCannotType(string text, string message)
     {
         var error = Assert.Throws<FormatException>(() => Cp500KeySequence.Parse(text));
