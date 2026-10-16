@@ -110,6 +110,11 @@ graph TB
   state and auto-repeats), ignores host auto-repeat, and releases everything on
   focus loss. The ROM has no key for `\`, `]`, `^` or `_`, so they are not
   mapped; the UP arrow produces `[`. Backspace is the LEFT arrow, which erases.
+- Automation: `Cp500ScreenText` reads the screen as Unicode the way
+  `Cp500Raster` draws it, `Cp500KeySequence` parses text to type (`\r`,
+  `{BREAK}` and so on) into `Cp500KeyPress` values, and `Cp500Automation` runs
+  a machine headlessly on top of them. Contracts:
+  [headless-runner.md](headless-runner.md).
 
 ## Rationale and lessons
 
@@ -120,6 +125,6 @@ supplies file IO while the drive logic and persistence policy are unit-tested
 in Devices.
 
 Related: [summary.md](summary.md), [memory-map.md](memory-map.md),
-[desktop-integration.md](desktop-integration.md),
+[desktop-integration.md](desktop-integration.md), [headless-runner.md](headless-runner.md),
 [../devices/devices.md](../devices/devices.md),
 [../devices/io-ports.md](../devices/io-ports.md).
