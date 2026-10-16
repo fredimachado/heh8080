@@ -42,4 +42,10 @@ public sealed record Cp500MachineProfile
     /// <see cref="Rs232Attachment.Apply"/> is the production writer.
     /// </summary>
     public bool Rs232Installed { get; init; }
+
+    /// <summary>
+    /// FreHD hard disk and clock. Stock machines leave this false, so C0h-CFh stay unregistered and read FFh.
+    /// <see cref="HardDiskAttachment.Apply"/> is the production writer.
+    /// </summary>
+    public bool HardDiskInstalled { get; init; }
 }

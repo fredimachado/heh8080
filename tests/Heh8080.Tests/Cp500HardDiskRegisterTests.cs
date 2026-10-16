@@ -10,6 +10,95 @@ public sealed class Cp500HardDiskRegisterTests
     private const byte Drq = ReadyAndSeek | StatusDataRequest;
     private const byte BusyStatus = StatusReady | StatusBusy | StatusCommandInProgress;
 
+    private static readonly byte[] Spin = [0x18, 0xFE];
+
+    [Fact]
+    public void StockMachineLeavesC0ThroughCfUnregistered()
+    {
+        var machine = new Cp500Machine(Cp500MachineProfile.Original, Spin);
+
+        for (byte port = BasePort; port <= StatusCommandPort; port++)
+        {
+            machine.IoBus.Out(port, 0x00);
+            Assert.Equal(0xFF, machine.IoBus.In(port));
+        }
+
+        machine.Step();
+        Assert.Equal(0xFF, machine.IoBus.In(BasePort));
+        Assert.False(machine.Profile.HardDiskInstalled);
+        Assert.Equal(2, machine.Profile.InstalledDrives);
+        Assert.False(Cp500MachineProfile.Original.HardDiskInstalled);
+    }
+
+    [Fact]
+    public void ApplyIsTheOnlyWriterAndTheStockProfileStaysOff()
+    {
+        var profile = new Cp500MachineProfile(32, 1) { ClockHz = 800, Rs232Installed = true };
+        Cp500MachineProfile applied = HardDiskAttachment.Install(new HardDiskSlot(), Clock()).Apply(profile);
+
+        Assert.True(applied.HardDiskInstalled);
+        Assert.False(profile.HardDiskInstalled);
+        Assert.False(Cp500MachineProfile.Original.HardDiskInstalled);
+        Assert.True(applied.Rs232Installed);
+        Assert.Equal(32, applied.RamSizeKiB);
+        Assert.Equal(1, applied.InstalledDrives);
+        Assert.Equal(800, applied.ClockHz);
+        Cp500MachineProfile cleared = HardDiskAttachment.None.Apply(applied);
+        Assert.False(cleared.HardDiskInstalled);
+        Assert.True(cleared.Rs232Installed);
+        Assert.Throws<ArgumentNullException>(() => HardDiskAttachment.Install(null!, Clock()));
+        Assert.Throws<ArgumentNullException>(() => HardDiskAttachment.Install(new HardDiskSlot(), null!));
+    }
+
+    [Fact]
+    public void AttachmentMustMatchTheProfileFlag()
+    {
+        HardDiskAttachment board = HardDiskAttachment.Install(new HardDiskSlot(), Clock());
+        Cp500MachineProfile installed = board.Apply(Cp500MachineProfile.Original);
+
+        Assert.Throws<ArgumentException>(() => new Cp500Machine(Cp500MachineProfile.Original, Spin, hardDisk: board));
+        Assert.Throws<ArgumentException>(() => new Cp500Machine(installed, Spin));
+        Assert.Throws<ArgumentException>(() =>
+            new Cp500Machine(Cp500MachineProfile.Original, Spin, hardDisk: new HardDiskAttachment(false, new HardDiskSlot(), null)));
+        Assert.Throws<ArgumentException>(() =>
+            new Cp500Machine(installed, Spin, hardDisk: new HardDiskAttachment(true, null, Clock())));
+        Assert.Throws<ArgumentException>(() => new Cp500Automation(Spin, hardDisk: board));
+    }
+
+    [Fact]
+    public void InstalledBoardReadsTheTaskFileAndResetKeepsTheDisk()
+    {
+        var bay = new Cp500DriveBay();
+        bay.HardDisk.Insert(Image(1), "disk.hdv", writeBack: null);
+        var serial = new Rs232Attachment(true, null);
+        HardDiskAttachment board = HardDiskAttachment.Install(bay.HardDisk, Clock());
+        Cp500MachineProfile profile = board.Apply(serial.Apply(Cp500MachineProfile.Original));
+        var automation = new Cp500Automation(Spin, bay, profile, serial, board);
+        Cp500Machine machine = automation.Machine;
+
+        Assert.True(machine.Profile.HardDiskInstalled);
+        Assert.True(machine.Profile.Rs232Installed);
+        Assert.Equal(2, machine.Profile.InstalledDrives);
+        Assert.NotEqual(0xFF, machine.IoBus.In(0xE8));
+        Assert.Equal(StatusReady, machine.IoBus.In(StatusCommandPort));
+
+        machine.IoBus.Out(0xCE, 0x00);
+        machine.IoBus.Out(StatusCommandPort, 0x20);
+        Assert.Equal(Drq, machine.IoBus.In(StatusCommandPort));
+        machine.Step();
+        Assert.Equal(Drq, machine.IoBus.In(StatusCommandPort));
+        Assert.Equal(SectorBytes(0)[0], machine.IoBus.In(DataPort));
+
+        machine.IoBus.Out(0xCC, 0x15);
+        machine.Reset();
+        Assert.Equal(0, machine.IoBus.In(0xCC));
+        Assert.Equal(StatusReady, machine.IoBus.In(StatusCommandPort));
+        Assert.Equal("disk.hdv", bay.HardDisk.Name);
+        machine.IoBus.Out(0xCE, 0x00);
+        machine.IoBus.Out(StatusCommandPort, 0x20);
+        Assert.Equal(SectorBytes(0), ReadData(machine.IoBus));
+    }
+
     [Fact]
     public void NoImageIsReadyAndASectorCommandSetsIdNotFound()
     {
@@ -385,6 +474,17 @@ public sealed class Cp500HardDiskRegisterTests
         file[29] = (byte)sectorsPerTrack;
         SectorBytes(0).CopyTo(file, 256);
         return file;
+    }
+
+    private static FixedClock Clock() => new(new HardDiskTime(0, 0, 0, 0, 1, 1));
+
+    private static byte[] ReadData(IoBus bus)
+    {
+        var data = new byte[HardDiskGeometry.BytesPerSector];
+        for (int i = 0; i < data.Length; i++)
+            data[i] = bus.In(DataPort);
+
+        return data;
     }
 
     private static byte[] SectorBytes(int sector)

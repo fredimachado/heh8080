@@ -13,6 +13,7 @@ public sealed class Cp500Machine
 
     private readonly CycleThrottle _throttle;
     private readonly Cp500Rs232Device? _rs232;
+    private readonly Cp500HardDiskController? _hardDisk;
     private long _breakCyclesRemaining;
     private double _speedFactor = 1;
     private bool _pacedForTyping;
@@ -23,13 +24,20 @@ public sealed class Cp500Machine
         ReadOnlySpan<byte> systemRom,
         IModelIIIDiskImageProvider? diskImages = null,
         IPrinterDevice? printer = null,
-        Rs232Attachment serial = default)
+        Rs232Attachment serial = default,
+        HardDiskAttachment hardDisk = default)
     {
         Profile = profile ?? throw new ArgumentNullException(nameof(profile));
         if (serial.Installed != profile.Rs232Installed)
             throw new ArgumentException("RS-232 attachment does not match Rs232Installed.");
         if (!serial.Installed && serial.Endpoint is not null)
             throw new ArgumentException("An RS-232 endpoint requires Rs232Installed.");
+        if (hardDisk.Installed != profile.HardDiskInstalled)
+            throw new ArgumentException("Hard-disk attachment does not match HardDiskInstalled.");
+        if (!hardDisk.Installed && (hardDisk.Media is not null || hardDisk.Clock is not null))
+            throw new ArgumentException("A hard-disk slot or clock requires HardDiskInstalled.");
+        if (hardDisk.Installed && (hardDisk.Media is null || hardDisk.Clock is null))
+            throw new ArgumentException("An installed hard disk requires a slot and a clock.");
         if (systemRom.Length == 0)
             throw new ArgumentException("A CP-500 system ROM is required.", nameof(systemRom));
 
@@ -66,6 +74,12 @@ public sealed class Cp500Machine
             _rs232.Register(IoBus);
             Interrupts.AttachRs232(_rs232);
             _rs232.StatusChanged = Interrupts.UpdateLines;
+        }
+
+        if (profile.HardDiskInstalled)
+        {
+            _hardDisk = new Cp500HardDiskController(hardDisk.Media!, hardDisk.Clock!);
+            _hardDisk.Register(IoBus);
         }
 
         Interrupts.InterruptLineChanged += asserted => Cpu.SetInterruptLine(asserted);
@@ -135,7 +149,7 @@ public sealed class Cp500Machine
 
     /// <summary>
     /// Executes one Z80 instruction, advances the cycle-driven hardware (disk controller,
-    /// 30 Hz timer, and the RS-232 board when it is installed) by that instruction's cycle count,
+    /// 30 Hz timer, the RS-232 board, and the hard disk when each is installed) by that instruction's cycle count,
     /// and calculates the host delay needed for real-time pacing.
     /// </summary>
     public int Step()
@@ -145,6 +159,7 @@ public sealed class Cp500Machine
         DiskController.AdvanceCycles(cycles);
         Interrupts.AdvanceCycles(cycles);
         _rs232?.AdvanceCycles(cycles);
+        _hardDisk?.AdvanceCycles(cycles);
         AdvanceBreakHold(cycles);
         Cpu.WaitLine = DiskControl.WaitActive;
         if (_speedFactor != 1)
@@ -173,6 +188,7 @@ public sealed class Cp500Machine
         DiskControl.Reset();
         Interrupts.Reset();
         _rs232?.Reset();
+        _hardDisk?.Reset();
         Video.ResetControl();
         _throttle.Reset();
         LastSuggestedDelay = TimeSpan.Zero;
