@@ -62,7 +62,6 @@ public partial class ConfigDialog : Window
         bool installed = _viewModel.Cp500HardDiskInstalled;
         HardDiskInstalled.IsChecked = installed;
         HardDiskInstalled.IsEnabled = _viewModel.IsCp500;
-        HardDiskPrefix.IsEnabled = installed;
         HardDiskLabel.IsEnabled = installed;
         MountHardDiskButton.IsEnabled = installed;
         EjectHardDiskButton.IsEnabled = installed;
