@@ -63,6 +63,35 @@ internal static class Cp500TestRoms
         0x18, 0xF0           // JR loop
     ];
 
+    /// <summary>
+    /// Programs the FreHD task file for cylinder 0, head 0, sector 0, size 256, drive 0, reads one sector,
+    /// stores it at 4000h, and copies the first eight bytes to the top of the screen.
+    /// </summary>
+    public static byte[] ReadingHardDiskSector() =>
+    [
+        0x3E, 0x00,
+        0xD3, 0xCE,
+        0xD3, 0xCB,
+        0xD3, 0xCC,
+        0xD3, 0xCD,
+        0x3E, 0x20,
+        0xD3, 0xCF,
+        0xDB, 0xCF,
+        0xCB, 0x7F,
+        0x20, 0xFA,
+        0x21, 0x00, 0x40,
+        0x06, 0x00,
+        0xDB, 0xC8,
+        0x77,
+        0x23,
+        0x10, 0xFA,
+        0x21, 0x00, 0x40,
+        0x11, 0x00, 0x3C,
+        0x01, 0x08, 0x00,
+        0xED, 0xB0,
+        0x18, 0xFE,
+    ];
+
     /// <summary>Reads drive 0, track 0, sector 1 (double density) into 4300h with the WD1791, then spins.</summary>
     public static byte[] ReadingBootSector() =>
         SectorTransfer(command: 0x80, transfer: [0xDB, 0xF3, 0x77], buffer: 0x4300); // IN A,(F3h); LD (HL),A

@@ -232,6 +232,22 @@ public sealed class Cp500RunnerTests : IDisposable
     }
 
     [Fact]
+    public void UntilScreenSeesTheMarkerFromTheHardDiskProgram()
+    {
+        string rom = File(Cp500TestRoms.ReadingHardDiskSector(), "hd.rom");
+        byte[] image = OneSector((byte)'F');
+        Encoding.ASCII.GetBytes("FREHD OK").CopyTo(image, 256);
+        string path = File(image, "marker.hdv");
+        byte[] before = System.IO.File.ReadAllBytes(path);
+
+        var result = Run("--rom", rom, "--hard-disk", path, "--until-screen", "FREHD OK", "--timeout", "2s");
+
+        Assert.Equal(RunnerExitCode.Success, result.ExitCode);
+        Assert.Equal("", result.Stderr);
+        Assert.Equal(before, System.IO.File.ReadAllBytes(path));
+    }
+
+    [Fact]
     public void HelpPrintsUsageAndSucceeds()
     {
         var result = Run("--help");
