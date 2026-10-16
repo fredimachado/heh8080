@@ -8,6 +8,7 @@ using Avalonia.Platform.Storage;
 using Heh8080.UI.ViewModels;
 using Heh8080.Core;
 using Heh8080.Devices;
+using Heh8080.Rs232;
 
 namespace Heh8080.Views;
 
@@ -47,7 +48,36 @@ public partial class ConfigDialog : Window
         Cpu8080.IsEnabled = !_viewModel.IsCp500;
         ResetHint.Text = _viewModel.IsCp500 ? "Restart the CP-500 ROM" : "Warm boot from A:";
         UpdateSpeedSelection();
+        UpdateRs232Selection();
         UpdateDriveLabels();
+    }
+
+    private void UpdateRs232Selection()
+    {
+        if (_viewModel == null)
+            return;
+
+        bool enabled = _viewModel.IsCp500;
+        Rs232Off.IsEnabled = enabled;
+        Rs232Tcp.IsEnabled = enabled;
+        Rs232Com.IsEnabled = enabled;
+        Rs232Hayes.IsEnabled = enabled;
+        Rs232Apply.IsEnabled = enabled;
+        ShowRs232Fields();
+    }
+
+    private void ShowRs232Fields()
+    {
+        bool enabled = _viewModel?.IsCp500 == true;
+        bool tcp = Rs232Tcp.IsChecked == true;
+        Rs232TcpFields.IsVisible = tcp;
+        Rs232ComFields.IsVisible = Rs232Com.IsChecked == true;
+        Rs232HayesFields.IsVisible = Rs232Hayes.IsChecked == true;
+        Rs232Host.IsEnabled = enabled && Rs232Listen.IsChecked != true;
+        Rs232Port.IsEnabled = enabled;
+        Rs232Listen.IsEnabled = enabled;
+        Rs232ComName.IsEnabled = enabled;
+        Rs232HayesPort.IsEnabled = enabled;
     }
 
     /// <summary>CP/M always runs as fast as it can, so the speed choice applies to the CP-500 only.</summary>
@@ -199,6 +229,80 @@ public partial class ConfigDialog : Window
             StatusLabel.Text = _viewModel.StatusText;
         }
     }
+
+    private void Rs232_Click(object? sender, RoutedEventArgs e) => ShowRs232Fields();
+
+    private void Rs232Listen_Click(object? sender, RoutedEventArgs e) => ShowRs232Fields();
+
+    private async void Rs232Apply_Click(object? sender, RoutedEventArgs e)
+    {
+        if (_viewModel == null || !_viewModel.IsCp500)
+            return;
+
+        try
+        {
+            Rs232Link link = BuildRs232Link();
+            Rs232Attachment cable = Rs232Endpoint.Open(link, Cp500MachineProfile.Original.ClockHz);
+            try
+            {
+                await _viewModel.SetCp500Rs232(cable);
+            }
+            catch
+            {
+                cable.Endpoint?.Dispose();
+                throw;
+            }
+
+            string status = Rs232Status(link);
+            _viewModel.StatusText = status;
+            StatusLabel.Text = status;
+        }
+        catch (Exception ex)
+        {
+            _viewModel.StatusText = ex.Message;
+            StatusLabel.Text = ex.Message;
+        }
+    }
+
+    private Rs232Link BuildRs232Link()
+    {
+        if (Rs232Off.IsChecked == true)
+            return Rs232Link.Off;
+
+        if (Rs232Com.IsChecked == true)
+            return Rs232Link.Com(Rs232ComName.Text ?? "");
+
+        int port = Rs232PortNumber(Rs232Hayes.IsChecked == true ? Rs232HayesPort.Text : Rs232Port.Text);
+        if (Rs232Hayes.IsChecked == true)
+            return Rs232Link.Hayes(port);
+
+        if (Rs232Listen.IsChecked == true)
+            return Rs232Link.Listen(port);
+
+        string host = string.IsNullOrWhiteSpace(Rs232Host.Text) ? "127.0.0.1" : Rs232Host.Text.Trim();
+        return Rs232Link.Tcp(host, port);
+    }
+
+    private static int Rs232PortNumber(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return 2323;
+
+        if (!int.TryParse(text, out int port))
+            throw new FormatException($"RS-232 link must be {Rs232Link.Syntax}.");
+
+        return port;
+    }
+
+    private static string Rs232Status(Rs232Link link) => link switch
+    {
+        Rs232Link.OffLink => "RS-232 off. Machine restarted.",
+        Rs232Link.TcpLink tcp => $"RS-232 TCP {tcp.Host}:{tcp.Port}. Machine restarted.",
+        Rs232Link.ListenLink listen => $"RS-232 TCP listen {listen.Port}. Machine restarted.",
+        Rs232Link.HayesLink hayes => $"RS-232 Hayes listen {hayes.Port}. Machine restarted.",
+        Rs232Link.ComLink com => $"RS-232 COM {com.Name}. Machine restarted.",
+        _ => throw new ArgumentOutOfRangeException(nameof(link), link.GetType().Name, "Unknown RS-232 link."),
+    };
 
     private async void Machine_Click(object? sender, RoutedEventArgs e)
     {

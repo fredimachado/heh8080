@@ -26,6 +26,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     private readonly byte[]? _cp500Rom;
     private readonly Cp500DriveBay _cp500Drives = new();
     private Cp500Machine? _cp500Machine;
+    private ISerialEndpoint? _cp500Serial;
     private CancellationTokenSource? _cp500Cancellation;
     private Task? _cp500RunTask;
 
@@ -450,6 +451,49 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         StatusText = double.IsPositiveInfinity(factor) ? "CP-500 speed: maximum" : $"CP-500 speed: {factor}x";
     }
 
+    /// <summary>
+    /// Replaces the CP-500 with a machine on the same disks, RAM, clock, and speed, cabled by <paramref name="rs232"/>.
+    /// The previous cable is released only after the new machine exists. A failed build leaves the running machine in place
+    /// and leaves <paramref name="rs232"/> with the caller.
+    /// </summary>
+    public async Task SetCp500Rs232(Rs232Attachment rs232)
+    {
+        if (_cp500Machine == null || _cp500Rom == null)
+            throw new InvalidOperationException("The CP-500 is not running.");
+
+        bool wasRunning = _cp500Cancellation != null;
+        await StopCp500Async();
+        Cp500Machine previous = _cp500Machine;
+        ISerialEndpoint? previousEndpoint = _cp500Serial;
+        try
+        {
+            Cp500MachineProfile profile = rs232.Apply(new Cp500MachineProfile(
+                previous.Profile.RamSizeKiB,
+                previous.Profile.InstalledDrives)
+            {
+                ClockHz = previous.Profile.ClockHz
+            });
+            var machine = new Cp500Machine(profile, _cp500Rom, _cp500Drives.Images, serial: rs232);
+            machine.SpeedFactor = Cp500SpeedFactor;
+            _cp500Machine = machine;
+            _cp500Serial = rs232.Endpoint;
+            ResetCp500Machine();
+            previousEndpoint?.Dispose();
+        }
+        catch
+        {
+            _cp500Machine = previous;
+            _cp500Serial = previousEndpoint;
+            if (wasRunning)
+                StartCp500();
+            throw;
+        }
+
+        ActiveMachineChanged?.Invoke();
+        if (wasRunning)
+            StartCp500();
+    }
+
     private async Task WithCp500Paused(Action action)
     {
         bool wasRunning = _cp500Cancellation != null;
@@ -557,6 +601,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public void Dispose()
     {
         StopCp500Async().GetAwaiter().GetResult();
+        _cp500Serial?.Dispose();
+        _cp500Serial = null;
         FlushCp500Disks();
         StopInterruptTimer();
         _emulator.StopAsync().Wait(TimeSpan.FromSeconds(1));

@@ -2,7 +2,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         x:Class="Heh8080.Views.ConfigDialog"
         Title="FJM-3A Configuration"
-        Width="420"
+        Width="520"
         SizeToContent="Height"
         CanResize="False"
         WindowStartupLocation="CenterOwner"
@@ -101,7 +101,7 @@
             <TextBlock Text="SYSTEM" FontWeight="Bold" Foreground="#33FF33"
                        FontFamily="Consolas,monospace" FontSize="12"/>
 
-            <Grid RowDefinitions="Auto,Auto,Auto,Auto" ColumnDefinitions="80,*" Margin="8,0,0,0">
+            <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto" ColumnDefinitions="80,*" Margin="8,0,0,0">
                 <Grid.Styles>
                     <Style Selector="TextBlock">
                         <Setter Property="FontFamily" Value="Consolas,monospace"/>
@@ -125,6 +125,20 @@
                     </Style>
                     <Style Selector="RadioButton:checked /template/ Ellipse#CheckGlyph">
                         <Setter Property="Fill" Value="#0A140A"/>
+                    </Style>
+                    <Style Selector="TextBox">
+                        <Setter Property="FontFamily" Value="Consolas,monospace"/>
+                        <Setter Property="Foreground" Value="#33FF33"/>
+                        <Setter Property="Background" Value="#1A2A1A"/>
+                        <Setter Property="BorderBrush" Value="#33FF33"/>
+                        <Setter Property="FontSize" Value="11"/>
+                        <Setter Property="Padding" Value="4,2"/>
+                        <Setter Property="MinHeight" Value="0"/>
+                    </Style>
+                    <Style Selector="CheckBox">
+                        <Setter Property="FontFamily" Value="Consolas,monospace"/>
+                        <Setter Property="Foreground" Value="#33FF33"/>
+                        <Setter Property="FontSize" Value="11"/>
                     </Style>
                 </Grid.Styles>
 
@@ -156,8 +170,40 @@
                                  Click="Speed_Click"/>
                 </StackPanel>
 
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="Action:" Margin="0,8,0,0"/>
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="RS-232:" Margin="0,8,0,0"/>
                 <StackPanel Grid.Row="3" Grid.Column="1" Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
+                    <RadioButton x:Name="Rs232Off" Content="Off" GroupName="Rs232"
+                                 IsChecked="True" Click="Rs232_Click"/>
+                    <RadioButton x:Name="Rs232Tcp" Content="TCP" GroupName="Rs232" Click="Rs232_Click"/>
+                    <RadioButton x:Name="Rs232Com" Content="COM" GroupName="Rs232" Click="Rs232_Click"/>
+                    <RadioButton x:Name="Rs232Hayes" Content="Hayes" GroupName="Rs232" Click="Rs232_Click"/>
+                    <Button x:Name="Rs232Apply" Content="Apply" Click="Rs232Apply_Click"
+                            Background="#1A2A1A" Foreground="#33FF33"
+                            BorderBrush="#33FF33" BorderThickness="1"
+                            FontFamily="Consolas,monospace" FontSize="11"
+                            Padding="12,6" CornerRadius="2"/>
+                </StackPanel>
+
+                <StackPanel Grid.Row="4" Grid.Column="1" Margin="0,8,0,0" Spacing="8">
+                    <StackPanel x:Name="Rs232TcpFields" Orientation="Horizontal" Spacing="8" IsVisible="False">
+                        <TextBlock Text="Host" VerticalAlignment="Center"/>
+                        <TextBox x:Name="Rs232Host" Width="120" Watermark="127.0.0.1"/>
+                        <TextBlock Text="Port" VerticalAlignment="Center"/>
+                        <TextBox x:Name="Rs232Port" Width="64" Watermark="2323"/>
+                        <CheckBox x:Name="Rs232Listen" Content="Listen" Click="Rs232Listen_Click" VerticalAlignment="Center"/>
+                    </StackPanel>
+                    <StackPanel x:Name="Rs232ComFields" Orientation="Horizontal" Spacing="8" IsVisible="False">
+                        <TextBlock Text="Port" VerticalAlignment="Center"/>
+                        <TextBox x:Name="Rs232ComName" Width="120" Watermark="COM3"/>
+                    </StackPanel>
+                    <StackPanel x:Name="Rs232HayesFields" Orientation="Horizontal" Spacing="8" IsVisible="False">
+                        <TextBlock Text="Port" VerticalAlignment="Center"/>
+                        <TextBox x:Name="Rs232HayesPort" Width="64" Watermark="2323"/>
+                    </StackPanel>
+                </StackPanel>
+
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="Action:" Margin="0,8,0,0"/>
+                <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
                     <Button Content="Reset CPU" Click="Reset_Click"
                             Background="#1A2A1A" Foreground="#33FF33"
                             BorderBrush="#33FF33" BorderThickness="1"
