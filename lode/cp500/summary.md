@@ -127,8 +127,9 @@ countdown tests and `RealRomWithEmptyDrivesResetHoldingBreakReachesBasic` in
 
 ## Rationale and lessons
 
-Keeping the composition in Devices lets Desktop, Browser, tests, and
-`heh8080-cp500` share exactly one CP-500 hardware contract. Time is driven by
+Keeping the composition in Devices lets Desktop, Browser, tests,
+`heh8080-cp500`, and the runner in [headless-runner.md](headless-runner.md)
+share exactly one CP-500 hardware contract. Time is driven by
 `Step`, so tests are deterministic and a host cannot drift the timer from the
 CPU. Treating an installed drive as present even when empty is what makes the
 ROM show `Diskette?` like the real machine instead of silently entering BASIC.

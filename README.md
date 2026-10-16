@@ -61,6 +61,23 @@ When the app finds both files, it starts in the CP-500 at 100% scale. If a file 
 - With a bootable disk in drive 0 (TRS-DOS, DOS-500 and similar), the machine boots from the disk. Disk images can be `.dsk`, `.dmk` or `.jv3`. A disk that the machine writes to is saved back to its file.
 - Esc is BREAK, Home is CLEAR, and Backspace is the left arrow, which erases.
 
+### Headless runner
+
+`heh8080-cp500` runs the CP-500 from the command line with no window, for tests and CI. It boots a ROM and up to four disks, runs the steps you give it in order, as fast as your computer allows, and exits with a code you can check. Emulated time counts Z80 cycles only, so every run gives the same result.
+
+```bash
+dotnet run --project src/Heh8080.Cp500Runner -- --rom cp500/cp500.rom \
+  --until-screen "BASIC (S ou N)" --type 'S\r\r' --until-screen READY \
+  --type 'PRINT 2+3\r' --until-screen " 5" --dump-screen
+```
+
+- Steps: `--until-screen <text>` waits for text on the screen, `--type <text>` types it (`\r` is Enter, `{BREAK}`, `{CLEAR}` and the arrows are named in braces), `--run <duration>` runs for a while (`500ms`, `30s`, `2m`).
+- `--disk0` to `--disk3` mount `.dsk`, `.jv3` or `.dmk` images, and `--write-back` saves modified disks when the run ends. `--timeout` sets how long each wait may take (30 seconds by default).
+- `--dump-screen` prints the screen as text, with Portuguese letters, block graphics and katakana as Unicode. `--dump-memory 4300:256` prints a hex dump.
+- Exit code 0 means every step succeeded, 1 means a wait timed out (the screen is printed to stderr), and 2 means a usage error or a bad file.
+
+Full contract: [lode/cp500/headless-runner.md](lode/cp500/headless-runner.md).
+
 ## Technology
 
 - .NET 10, Avalonia UI 11.x
@@ -77,6 +94,7 @@ src/
   Heh8080.Terminal/  # FJM-3A terminal emulator
   Heh8080.App/       # Shared UI library: ViewModels, Views, Controls
   Heh8080.Mcp/       # MCP server for AI-assisted development
+  Heh8080.Cp500Runner/ # heh8080-cp500 headless CP-500 command-line runner
   Heh8080.Desktop/   # Desktop entry point with Avalonia UI
   Heh8080.Browser/   # Browser entry point with Avalonia WASM
 tests/
@@ -92,6 +110,9 @@ dotnet publish src/Heh8080.Desktop -c Release
 
 # Browser (WASM)
 dotnet publish src/Heh8080.Browser -c Release
+
+# CP-500 headless runner (NativeAOT)
+dotnet publish src/Heh8080.Cp500Runner -c Release
 ```
 
 ## Related Projects

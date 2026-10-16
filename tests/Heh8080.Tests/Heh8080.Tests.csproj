@@ -20,6 +20,7 @@
     <ProjectReference Include="..\..\src\Heh8080.App\Heh8080.App.csproj" />
     <ProjectReference Include="..\..\src\Heh8080.Cp500Host\Heh8080.Cp500Host.csproj" />
     <ProjectReference Include="..\..\src\Heh8080.Core\Heh8080.Core.csproj" />
+    <ProjectReference Include="..\..\src\Heh8080.Cp500Runner\Heh8080.Cp500Runner.csproj" />
     <ProjectReference Include="..\..\src\Heh8080.Devices\Heh8080.Devices.csproj" />
     <ProjectReference Include="..\..\src\Heh8080.Terminal\Heh8080.Terminal.csproj" />
   </ItemGroup>

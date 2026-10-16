@@ -25,6 +25,7 @@
 - [cp500/memory-map.md](cp500/memory-map.md) - Mapped-ROM/RAM/VRAM/keyboard contract
 - [cp500/devices.md](cp500/devices.md) - CP-500 peripherals, WD1791, disk images, drive bay and keyboard contracts
 - [cp500/desktop-integration.md](cp500/desktop-integration.md) - Avalonia machine selection, display, input, disk mounting, character-generator rendering and execution host
+- [cp500/headless-runner.md](cp500/headless-runner.md) - `heh8080-cp500` command-line runner, `Cp500Automation`, screen text and typing contracts
 
 ## Terminal
 - [terminal/terminal.md](terminal/terminal.md) - ADM-3A terminal emulator
