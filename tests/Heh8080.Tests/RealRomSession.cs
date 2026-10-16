@@ -1,4 +1,3 @@
-using System.Text;
 using Heh8080.Devices;
 
 namespace Heh8080.Tests;
@@ -70,23 +69,7 @@ internal sealed class RealRomSession
         }
     }
 
-    public string Screen()
-    {
-        var rows = new List<string>();
-        for (int row = 0; row < Cp500VideoDevice.Rows; row++)
-        {
-            var text = new StringBuilder(Cp500VideoDevice.Columns);
-            for (int column = 0; column < Cp500VideoDevice.Columns; column++)
-            {
-                byte value = Machine.Video.ReadCharacter(column, row);
-                text.Append(value is >= 0x20 and < 0x7F ? (char)value : ' ');
-            }
-
-            rows.Add(text.ToString().TrimEnd());
-        }
-
-        return string.Join('\n', rows);
-    }
+    public string Screen() => Cp500Screen.ToText(Machine.Video);
 
     private static Cp500KeyStroke Stroke(char key)
     {
