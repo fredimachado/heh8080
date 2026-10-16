@@ -80,3 +80,48 @@ public readonly record struct HardDiskTime
         return true;
     }
 }
+
+/// <summary>
+/// Time behind the FreHD clock. Implementations live outside Heh8080.Devices, or they call a delegate
+/// the host supplied. Tests pass a fake.
+/// </summary>
+public interface IClock
+{
+    /// <summary>The current sample.</summary>
+    HardDiskTime Read();
+
+    /// <summary>Stores the sample. Does not change the host operating-system clock.</summary>
+    void Set(HardDiskTime time);
+}
+
+/// <summary>
+/// Host clock plus an offset. <paramref name="now"/> is the host instant. This type does not call
+/// <see cref="DateTime.Now"/>. A guest set moves the offset and leaves the host clock alone.
+/// </summary>
+public sealed class OffsetClock : IClock
+{
+    private readonly Func<DateTime> _now;
+    private TimeSpan _offset;
+
+    /// <summary>Creates a clock that reads <paramref name="now"/> and applies a guest offset of whole seconds.</summary>
+    public OffsetClock(Func<DateTime> now)
+    {
+        ArgumentNullException.ThrowIfNull(now);
+        _now = now;
+    }
+
+    /// <summary>The host instant plus the guest offset.</summary>
+    public HardDiskTime Read() => HardDiskTime.FromLocal(_now() + _offset);
+
+    /// <summary>The controller has already required <see cref="HardDiskTime.TryToLocalDateTime"/>.</summary>
+    public void Set(HardDiskTime time)
+    {
+        if (!time.TryToLocalDateTime(out DateTime local))
+            throw new ArgumentOutOfRangeException(nameof(time));
+
+        _offset = WholeSeconds(local) - WholeSeconds(_now());
+    }
+
+    private static DateTime WholeSeconds(DateTime value) =>
+        new(value.Year, value.Month, value.Day, value.Hour, value.Minute, value.Second, value.Kind);
+}
