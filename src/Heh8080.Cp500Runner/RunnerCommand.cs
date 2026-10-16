@@ -103,7 +103,32 @@ public static class RunnerCommand
             }
         }
 
-        return new Cp500Automation(rom, drives, cable.Apply(Cp500MachineProfile.Original), cable);
+        HardDiskAttachment board = HardDiskAttachment.None;
+        if (run.HardDisk is { } hardDisk)
+        {
+            byte[] image = ReadFile("hard disk", hardDisk.Path);
+            bool readOnly = File.GetAttributes(hardDisk.Path).HasFlag(FileAttributes.ReadOnly);
+            Action<byte[]>? writeBack = run.WriteBack ? bytes => WriteAtomically(hardDisk.Path, bytes) : null;
+            try
+            {
+                drives.HardDisk.Insert(
+                    image,
+                    Path.GetFileName(hardDisk.Path),
+                    writeBack,
+                    readOnly,
+                    hardDisk.RawGeometry);
+            }
+            catch (InvalidDataException error)
+            {
+                throw new InvalidDataException(
+                    $"hard disk '{hardDisk.Path}' is not a valid image: {error.Message}",
+                    error);
+            }
+
+            board = HardDiskAttachment.Install(drives.HardDisk, new OffsetClock(() => DateTime.Now));
+        }
+
+        return new Cp500Automation(rom, drives, board.Apply(cable.Apply(Cp500MachineProfile.Original)), cable, board);
     }
 
     private static RunnerExitCode RunSteps(Cp500Automation automation, RunMachine run, TextWriter stderr)

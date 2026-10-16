@@ -72,6 +72,13 @@ public readonly record struct ScreenText
 /// <summary>One mounted image. Write-back is null when the host cannot save.</summary>
 public sealed record Cp500Disk(byte[] Image, string Name, Action<byte[]>? WriteBack);
 
+/// <summary>Bytes for the session to insert. Write-back is <see cref="File.WriteAllBytes"/> on this host. Read-only stays false.</summary>
+public sealed record Cp500HardDisk(
+    byte[] Image,
+    string Name,
+    Action<byte[]>? WriteBack,
+    HardDiskGeometry? RawGeometry = null);
+
 /// <summary>
 /// Disks for one CP-500. An index outside 0 .. MaxDrives-1 is rejected.
 /// Installed count is at least the original two, and rises when a higher drive is filled.
@@ -138,23 +145,45 @@ public sealed class Cp500Session : IDisposable
     private readonly ISerialEndpoint? _endpoint;
     private bool _disposed;
 
-    private Cp500Session(ReadOnlyMemory<byte> rom, Cp500Media media, Rs232Attachment rs232)
+    private Cp500Session(
+        ReadOnlyMemory<byte> rom,
+        Cp500Media media,
+        Rs232Attachment rs232,
+        Cp500HardDisk? hardDisk,
+        IClock? clock)
     {
         ArgumentNullException.ThrowIfNull(media);
+        if ((hardDisk is null) != (clock is null))
+            throw new ArgumentException("A hard disk and a clock are passed together.");
+
         if (rom.Length == 0 || rom.Length > Cp500MachineProfile.SystemRomSizeBytes)
             throw new Cp500Rejected(
                 $"ROM must be 1 through {Cp500MachineProfile.SystemRomSizeBytes} bytes.");
 
-        var profile = rs232.Apply(new Cp500MachineProfile(
+        _endpoint = rs232.Endpoint;
+        _bay = new Cp500DriveBay();
+        HardDiskAttachment board = HardDiskAttachment.None;
+        if (hardDisk is { } image && clock is { } time)
+        {
+            try
+            {
+                _bay.HardDisk.Insert(image.Image, image.Name, image.WriteBack, readOnly: false, image.RawGeometry);
+            }
+            catch (InvalidDataException ex)
+            {
+                throw new Cp500Rejected($"Hard disk '{image.Name}' is not a valid image: {ex.Message}");
+            }
+
+            board = HardDiskAttachment.Install(_bay.HardDisk, time);
+        }
+
+        var profile = board.Apply(rs232.Apply(new Cp500MachineProfile(
             Cp500MachineProfile.Original.RamSizeKiB,
             media.InstalledDrives)
         {
             ClockHz = Cp500MachineProfile.Original.ClockHz
-        });
-
-        _endpoint = rs232.Endpoint;
-        _bay = new Cp500DriveBay();
-        _machine = new Cp500Machine(profile, rom.Span, _bay.Images, serial: rs232);
+        }));
+        _machine = new Cp500Machine(profile, rom.Span, _bay.Images, serial: rs232, hardDisk: board);
         for (int drive = 0; drive < ModelIIIDiskGeometry.MaxDrives; drive++)
         {
             if (media.Get(drive) is not { } disk)
@@ -173,10 +202,19 @@ public sealed class Cp500Session : IDisposable
         _machine.SpeedFactor = double.PositiveInfinity;
     }
 
-    /// <summary>Inserts disks, sets infinite speed, then <see cref="Boot"/>.</summary>
-    public static Cp500Session Create(ReadOnlyMemory<byte> rom, Cp500Media media, Rs232Attachment rs232 = default)
+    /// <summary>
+    /// Inserts disks, sets infinite speed, then <see cref="Boot"/>.
+    /// <paramref name="hardDisk"/> and <paramref name="clock"/> are both null, or both set.
+    /// The session inserts into its own bay slot, then <see cref="HardDiskAttachment.Apply"/>.
+    /// </summary>
+    public static Cp500Session Create(
+        ReadOnlyMemory<byte> rom,
+        Cp500Media media,
+        Rs232Attachment rs232 = default,
+        Cp500HardDisk? hardDisk = null,
+        IClock? clock = null)
     {
-        var session = new Cp500Session(rom, media, rs232);
+        var session = new Cp500Session(rom, media, rs232, hardDisk, clock);
         session.Boot();
         return session;
     }

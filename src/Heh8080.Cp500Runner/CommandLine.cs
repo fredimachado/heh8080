@@ -21,6 +21,8 @@ internal static class CommandLine
         Machine:
           --rom <path>              System ROM image (required).
           --disk0 .. --disk3 <path> Disk image for a drive: raw, JV3 or DMK.
+          --hard-disk <path>        FreHD image, or a raw sector body when --chs is set.
+          --chs <c>,<h>,<s>         Cylinders, heads, and sectors for a raw --hard-disk body.
           --rs232 <link>            off | tcp:<host>:<port> | listen:<port> | hayes:<port> | com:<name>.
           --write-back              At exit, save modified disks to their files in their own format.
           --timeout <duration>      Emulated time each --until-screen may take (default 30s).
@@ -54,6 +56,8 @@ internal static class CommandLine
         bool writeBack = false;
         bool dumpScreen = false;
         Rs232Link? rs232 = null;
+        string? hardDisk = null;
+        HardDiskGeometry? chs = null;
         TimeSpan? timeout = null;
         var dumps = new List<MemoryRange>();
         var steps = new List<RunnerStep>();
@@ -73,6 +77,12 @@ internal static class CommandLine
                     break;
                 case "--rs232":
                     rs232 = Once(rs232, option, ParseLink(Value(args, ref i)));
+                    break;
+                case "--hard-disk":
+                    hardDisk = Once(hardDisk, option, Value(args, ref i));
+                    break;
+                case "--chs":
+                    chs = Once(chs, option, ParseGeometry(Value(args, ref i)));
                     break;
                 case "--dump-screen":
                     dumpScreen = true;
@@ -102,6 +112,9 @@ internal static class CommandLine
         if (rom is null)
             throw new UsageException("--rom is required.");
 
+        if (chs is not null && hardDisk is null)
+            throw new UsageException("--chs requires --hard-disk.");
+
         return new RunMachine(
             rom,
             disks.OfType<DiskOption>().ToArray(),
@@ -110,7 +123,29 @@ internal static class CommandLine
             dumpScreen,
             dumps,
             steps,
-            rs232 ?? Rs232Link.Off);
+            rs232 ?? Rs232Link.Off,
+            hardDisk is null ? null : new HardDiskOption(hardDisk, chs));
+    }
+
+    private static HardDiskGeometry ParseGeometry(string text)
+    {
+        string[] parts = text.Split(',');
+        if (parts.Length != 3
+            || !int.TryParse(parts[0], NumberStyles.None, CultureInfo.InvariantCulture, out int cylinders)
+            || !int.TryParse(parts[1], NumberStyles.None, CultureInfo.InvariantCulture, out int heads)
+            || !int.TryParse(parts[2], NumberStyles.None, CultureInfo.InvariantCulture, out int sectors))
+        {
+            throw new UsageException("--chs needs <cylinders>,<heads>,<sectors>.");
+        }
+
+        try
+        {
+            return new HardDiskGeometry(cylinders, heads, sectors);
+        }
+        catch (ArgumentOutOfRangeException)
+        {
+            throw new UsageException("--chs needs cylinders 1-1023, heads 1-8, and sectors 1-256.");
+        }
     }
 
     /// <summary>Parses 500ms, 30s, 2m or 1.5s into a positive duration of at most a day.</summary>

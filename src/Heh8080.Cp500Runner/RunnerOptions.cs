@@ -17,6 +17,9 @@ internal sealed record RunStep(TimeSpan Duration) : RunnerStep("--run");
 /// <summary>A disk image file for a drive.</summary>
 internal sealed record DiskOption(int Drive, string Path);
 
+/// <summary>Parsed --hard-disk. RawGeometry is null for an HDV file.</summary>
+internal sealed record HardDiskOption(string Path, HardDiskGeometry? RawGeometry);
+
 /// <summary>A range of the 64 KiB address space to print at exit; it never runs past FFFFh.</summary>
 internal sealed record MemoryRange
 {
@@ -48,4 +51,5 @@ internal sealed record RunMachine(
     bool DumpScreen,
     IReadOnlyList<MemoryRange> DumpMemory,
     IReadOnlyList<RunnerStep> Steps,
-    Rs232Link Rs232) : ParsedCommandLine;
+    Rs232Link Rs232,
+    HardDiskOption? HardDisk) : ParsedCommandLine;

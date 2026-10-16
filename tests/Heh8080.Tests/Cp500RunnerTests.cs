@@ -147,6 +147,11 @@ public sealed class Cp500RunnerTests : IDisposable
     [InlineData(new[] { "--rom", "a", "--dump-memory", "FFFF:2" }, "--dump-memory 'FFFF:2': the length must be 1 to 1 bytes from FFFFh.")]
     [InlineData(new[] { "--rom", "a", "--rs232", "tcp:a:b:1" }, "RS-232 link must be off | tcp:<host>:<port> | listen:<port> | hayes:<port> | com:<name>.")]
     [InlineData(new[] { "--rom", "a", "--rs232", "off", "--rs232", "listen:1" }, "--rs232 was given more than once.")]
+    [InlineData(new[] { "--rom", "a", "--chs", "1,1,1" }, "--chs requires --hard-disk.")]
+    [InlineData(new[] { "--rom", "a", "--hard-disk", "d.hdv", "--chs", "1,1" }, "--chs needs <cylinders>,<heads>,<sectors>.")]
+    [InlineData(new[] { "--rom", "a", "--hard-disk", "d.hdv", "--chs", "0,1,1" }, "--chs needs cylinders 1-1023, heads 1-8, and sectors 1-256.")]
+    [InlineData(new[] { "--rom", "a", "--hard-disk", "d.hdv", "--hard-disk", "e.hdv" }, "--hard-disk was given more than once.")]
+    [InlineData(new[] { "--rom", "a", "--chs", "1,1,1", "--chs", "2,1,1" }, "--chs was given more than once.")]
     public void UsageErrorsExitWithTwoAndSayWhatIsWrong(string[] args, string message)
     {
         var result = Run(args);
@@ -174,6 +179,56 @@ public sealed class Cp500RunnerTests : IDisposable
         Assert.Equal($"heh8080-cp500: ROM '{empty}' is empty.\n", emptyRom.Stderr);
         Assert.Equal(RunnerExitCode.UsageError, badDisk.ExitCode);
         Assert.StartsWith($"heh8080-cp500: disk2 '{garbage}' is not a valid disk image: ", badDisk.Stderr);
+    }
+
+    [Fact]
+    public void HardDiskStaysOffUntilTheFlagAndWriteBackHonorsReadOnly()
+    {
+        string rom = File([0xDB, 0xCF, 0x32, 0x00, 0x40, 0x18, 0xFE], "status.rom");
+        string writer = File(WriteSectorOf5A, "writer.rom");
+        string image = File(OneSector(0x11), "disk.hdv");
+        string raw = File(Enumerable.Repeat((byte)0x11, 256).ToArray(), "body.img");
+
+        var absent = Run("--rom", rom, "--run", "50ms", "--dump-memory", "4000:1");
+        var present = Run("--rom", rom, "--hard-disk", image, "--run", "50ms", "--dump-memory", "4000:1");
+        Assert.Equal(RunnerExitCode.Success, absent.ExitCode);
+        Assert.Equal("4000: FF\n", absent.Stdout);
+        Assert.Equal(RunnerExitCode.Success, present.ExitCode);
+        Assert.Equal("4000: 40\n", present.Stdout);
+
+        byte[] before = System.IO.File.ReadAllBytes(image);
+        Assert.Equal(RunnerExitCode.Success, Run("--rom", writer, "--hard-disk", image, "--run", "100ms").ExitCode);
+        Assert.Equal(before, System.IO.File.ReadAllBytes(image));
+        Assert.Equal(RunnerExitCode.Success, Run("--rom", writer, "--hard-disk", image, "--write-back", "--run", "100ms").ExitCode);
+        byte[] saved = System.IO.File.ReadAllBytes(image);
+        Assert.Equal(0x56, saved[0]);
+        Assert.Equal(0x5A, saved[256]);
+        Assert.False(System.IO.File.Exists(image + ".tmp"));
+
+        Assert.Equal(RunnerExitCode.Success, Run(
+            "--rom", writer, "--hard-disk", raw, "--chs", "1,1,1", "--write-back", "--run", "100ms").ExitCode);
+        Assert.Equal(Enumerable.Repeat((byte)0x5A, 256).ToArray(), System.IO.File.ReadAllBytes(raw));
+
+        System.IO.File.SetAttributes(image, System.IO.FileAttributes.ReadOnly);
+        try
+        {
+            byte[] locked = System.IO.File.ReadAllBytes(image);
+            Assert.Equal(RunnerExitCode.Success, Run("--rom", writer, "--hard-disk", image, "--write-back", "--run", "100ms").ExitCode);
+            Assert.Equal(locked, System.IO.File.ReadAllBytes(image));
+        }
+        finally
+        {
+            System.IO.File.SetAttributes(image, System.IO.FileAttributes.Normal);
+        }
+
+        string garbage = File(new byte[32], "bad.hdv");
+        var bad = Run("--rom", rom, "--hard-disk", garbage, "--run", "50ms");
+        Assert.Equal(RunnerExitCode.UsageError, bad.ExitCode);
+        Assert.StartsWith($"heh8080-cp500: hard disk '{garbage}' is not a valid image: ", bad.Stderr);
+
+        var magicAndGeometry = Run("--rom", rom, "--hard-disk", image, "--chs", "1,1,1", "--run", "50ms");
+        Assert.Equal(RunnerExitCode.UsageError, magicAndGeometry.ExitCode);
+        Assert.Contains("is not a valid image", magicAndGeometry.Stderr);
     }
 
     [Fact]
@@ -259,6 +314,34 @@ public sealed class Cp500RunnerTests : IDisposable
             ? raw
             : ModelIIIDiskCodec.Serialize(ModelIIIDiskCodec.Parse(raw, ModelIIIDiskImageKind.Raw), kind);
     }
+
+    private static byte[] OneSector(byte marker)
+    {
+        var file = new byte[512];
+        file[0] = 0x56;
+        file[1] = 0xCB;
+        file[2] = 0x10;
+        file[26] = 1;
+        file[28] = 1;
+        file[29] = 1;
+        file[256] = marker;
+        return file;
+    }
+
+    private static readonly byte[] WriteSectorOf5A =
+    [
+        0xF3,
+        0x3E, 0x00,
+        0xD3, 0xCE,
+        0x3E, 0x30,
+        0xD3, 0xCF,
+        0x06, 0x00,
+        0x3E, 0x5A,
+        0x0E, 0xC8,
+        0xED, 0x79,
+        0x10, 0xFC,
+        0x18, 0xFE,
+    ];
 
     private static byte[] Sector(string text)
     {
