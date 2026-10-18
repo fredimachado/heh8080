@@ -24,6 +24,7 @@ internal static class CommandLine
           --hard-disk <path>        FreHD image, or a raw sector body when --chs is set.
           --chs <c>,<h>,<s>         Cylinders, heads, and sectors for a raw --hard-disk body.
           --rs232 <link>            off | tcp:<host>:<port> | listen:<port> | hayes:<port> | com:<name>.
+          --w5100                   Attach a W5100 network board at D0h-D3h.
           --write-back              At exit, save modified disks to their files in their own format.
           --timeout <duration>      Emulated time each --until-screen may take (default 30s).
 
@@ -53,6 +54,7 @@ internal static class CommandLine
 
         string? rom = null;
         var disks = new DiskOption?[MaxDrives];
+        bool w5100 = false;
         bool writeBack = false;
         bool dumpScreen = false;
         Rs232Link? rs232 = null;
@@ -71,6 +73,9 @@ internal static class CommandLine
                     return new ShowHelp();
                 case "--rom":
                     rom = Once(rom, option, Value(args, ref i));
+                    break;
+                case "--w5100":
+                    w5100 = true;
                     break;
                 case "--write-back":
                     writeBack = true;
@@ -118,6 +123,7 @@ internal static class CommandLine
         return new RunMachine(
             rom,
             disks.OfType<DiskOption>().ToArray(),
+            w5100,
             writeBack,
             timeout ?? DefaultTimeout,
             dumpScreen,

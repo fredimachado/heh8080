@@ -35,7 +35,8 @@ public sealed class Cp500Automation
         Cp500DriveBay? drives = null,
         Cp500MachineProfile? profile = null,
         Rs232Attachment rs232 = default,
-        HardDiskAttachment hardDisk = default)
+        HardDiskAttachment hardDisk = default,
+        bool w5100 = false)
     {
         Drives = drives ?? new Cp500DriveBay();
         Machine = new Cp500Machine(
@@ -44,6 +45,12 @@ public sealed class Cp500Automation
             Drives.Images,
             serial: rs232,
             hardDisk: hardDisk);
+        if (w5100)
+        {
+            W5100 = new W5100Device();
+            W5100.Register(Machine.IoBus);
+        }
+
         if (Machine.Profile.InstalledDrives > 0 && !Drives.Images.IsMounted(0))
             Machine.ResetHoldingBreak();
     }
@@ -53,6 +60,9 @@ public sealed class Cp500Automation
 
     /// <summary>The disks the machine reads; flush it to write modified disks back.</summary>
     public Cp500DriveBay Drives { get; }
+
+    /// <summary>W5100 network board when the host attached one.</summary>
+    public W5100Device? W5100 { get; }
 
     /// <summary>Z80 cycles executed since construction.</summary>
     public long ElapsedCycles { get; private set; }

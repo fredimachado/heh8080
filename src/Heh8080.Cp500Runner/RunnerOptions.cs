@@ -46,6 +46,7 @@ internal sealed record ShowHelp : ParsedCommandLine;
 internal sealed record RunMachine(
     string RomPath,
     IReadOnlyList<DiskOption> Disks,
+    bool W5100,
     bool WriteBack,
     TimeSpan Timeout,
     bool DumpScreen,

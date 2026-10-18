@@ -128,7 +128,13 @@ public static class RunnerCommand
             board = HardDiskAttachment.Install(drives.HardDisk, new OffsetClock(() => DateTime.Now));
         }
 
-        return new Cp500Automation(rom, drives, board.Apply(cable.Apply(Cp500MachineProfile.Original)), cable, board);
+        return new Cp500Automation(
+            rom,
+            drives,
+            board.Apply(cable.Apply(Cp500MachineProfile.Original)),
+            cable,
+            board,
+            run.W5100);
     }
 
     private static RunnerExitCode RunSteps(Cp500Automation automation, RunMachine run, TextWriter stderr)
