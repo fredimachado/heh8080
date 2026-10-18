@@ -45,6 +45,7 @@ internal sealed record RunMachine(
     IReadOnlyList<DiskOption> Disks,
     string? HardDiskPath,
     bool HardDiskHalt,
+    bool W5100,
     bool WriteBack,
     TimeSpan Timeout,
     bool DumpScreen,

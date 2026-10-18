@@ -36,7 +36,8 @@ public sealed class Cp500Automation
         Cp500MachineProfile? profile = null,
         byte[]? hardDiskImage = null,
         Action<byte[]>? hardDiskWriteBack = null,
-        bool hardDiskHalt = false)
+        bool hardDiskHalt = false,
+        bool w5100 = false)
     {
         Drives = drives ?? new Cp500DriveBay();
         Machine = new Cp500Machine(profile ?? Cp500MachineProfile.Original, systemRom, Drives.Images);
@@ -44,6 +45,12 @@ public sealed class Cp500Automation
         {
             FreHd = new FreHdDevice(hardDiskImage, hardDiskWriteBack, hardDiskHalt);
             FreHd.Register(Machine.IoBus);
+        }
+
+        if (w5100)
+        {
+            W5100 = new W5100Device();
+            W5100.Register(Machine.IoBus);
         }
 
         if (Machine.Profile.InstalledDrives > 0 && !Drives.Images.IsMounted(0))
@@ -58,6 +65,9 @@ public sealed class Cp500Automation
 
     /// <summary>FreHD hard disk when the host attached one.</summary>
     public FreHdDevice? FreHd { get; }
+
+    /// <summary>W5100 network board when the host attached one.</summary>
+    public W5100Device? W5100 { get; }
 
     /// <summary>Writes a dirty hard disk image back when a write-back callback was supplied.</summary>
     public void FlushHardDisk() => FreHd?.Flush();
