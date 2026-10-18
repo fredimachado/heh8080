@@ -104,7 +104,13 @@ public static class RunnerCommand
                 hdWriteBack = bytes => WriteAtomically(run.HardDiskPath, bytes);
         }
 
-        return new Cp500Automation(rom, drives, hardDiskImage: hdImage, hardDiskWriteBack: hdWriteBack, hardDiskHalt: run.HardDiskHalt);
+        return new Cp500Automation(
+            rom,
+            drives,
+            hardDiskImage: hdImage,
+            hardDiskWriteBack: hdWriteBack,
+            hardDiskHalt: run.HardDiskHalt,
+            w5100: run.W5100);
     }
 
     private static RunnerExitCode RunSteps(Cp500Automation automation, RunMachine run, TextWriter stderr)

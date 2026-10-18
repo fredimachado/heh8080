@@ -23,6 +23,7 @@ internal static class CommandLine
           --disk0 .. --disk3 <path> Disk image for a drive: raw, JV3 or DMK.
           --hd0 <path>              Linear hard disk image (256-byte blocks).
           --hd-halt                 Hold the DS1307 halt bit so the board clock is ignored.
+          --w5100                   Attach a W5100 network board at D0h-D3h.
           --write-back              At exit, save modified disks to their files in their own format.
           --timeout <duration>      Emulated time each --until-screen may take (default 30s).
 
@@ -54,6 +55,7 @@ internal static class CommandLine
         var disks = new DiskOption?[MaxDrives];
         string? hardDisk = null;
         bool hardDiskHalt = false;
+        bool w5100 = false;
         bool writeBack = false;
         bool dumpScreen = false;
         TimeSpan? timeout = null;
@@ -75,6 +77,9 @@ internal static class CommandLine
                     break;
                 case "--hd-halt":
                     hardDiskHalt = true;
+                    break;
+                case "--w5100":
+                    w5100 = true;
                     break;
                 case "--write-back":
                     writeBack = true;
@@ -112,6 +117,7 @@ internal static class CommandLine
             disks.OfType<DiskOption>().ToArray(),
             hardDisk,
             hardDiskHalt,
+            w5100,
             writeBack,
             timeout ?? DefaultTimeout,
             dumpScreen,
