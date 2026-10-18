@@ -21,6 +21,8 @@ internal static class CommandLine
         Machine:
           --rom <path>              System ROM image (required).
           --disk0 .. --disk3 <path> Disk image for a drive: raw, JV3 or DMK.
+          --hd0 <path>              Linear hard disk image (256-byte blocks).
+          --hd-halt                 Hold the DS1307 halt bit so the board clock is ignored.
           --write-back              At exit, save modified disks to their files in their own format.
           --timeout <duration>      Emulated time each --until-screen may take (default 30s).
 
@@ -50,6 +52,8 @@ internal static class CommandLine
 
         string? rom = null;
         var disks = new DiskOption?[MaxDrives];
+        string? hardDisk = null;
+        bool hardDiskHalt = false;
         bool writeBack = false;
         bool dumpScreen = false;
         TimeSpan? timeout = null;
@@ -65,6 +69,12 @@ internal static class CommandLine
                     return new ShowHelp();
                 case "--rom":
                     rom = Once(rom, option, Value(args, ref i));
+                    break;
+                case "--hd0":
+                    hardDisk = Once(hardDisk, option, Value(args, ref i));
+                    break;
+                case "--hd-halt":
+                    hardDiskHalt = true;
                     break;
                 case "--write-back":
                     writeBack = true;
@@ -100,6 +110,8 @@ internal static class CommandLine
         return new RunMachine(
             rom,
             disks.OfType<DiskOption>().ToArray(),
+            hardDisk,
+            hardDiskHalt,
             writeBack,
             timeout ?? DefaultTimeout,
             dumpScreen,

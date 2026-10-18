@@ -64,6 +64,7 @@ public static class RunnerCommand
         RunnerExitCode result = RunSteps(automation, run, stderr);
 
         automation.Drives.Flush();
+        automation.FlushHardDisk();
         if (run.DumpScreen)
             stdout.WriteLine(automation.ReadScreenText());
         foreach (MemoryRange range in run.DumpMemory)
@@ -94,7 +95,16 @@ public static class RunnerCommand
             }
         }
 
-        return new Cp500Automation(rom, drives);
+        byte[]? hdImage = null;
+        Action<byte[]>? hdWriteBack = null;
+        if (run.HardDiskPath is not null)
+        {
+            hdImage = ReadFile("hard disk", run.HardDiskPath);
+            if (run.WriteBack)
+                hdWriteBack = bytes => WriteAtomically(run.HardDiskPath, bytes);
+        }
+
+        return new Cp500Automation(rom, drives, hardDiskImage: hdImage, hardDiskWriteBack: hdWriteBack, hardDiskHalt: run.HardDiskHalt);
     }
 
     private static RunnerExitCode RunSteps(Cp500Automation automation, RunMachine run, TextWriter stderr)

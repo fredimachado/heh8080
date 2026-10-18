@@ -30,10 +30,22 @@ public sealed class Cp500Automation
     /// installed and drive 0 is empty, it resets holding BREAK, so the stock ROM offers BASIC instead of waiting
     /// for a diskette.
     /// </summary>
-    public Cp500Automation(ReadOnlySpan<byte> systemRom, Cp500DriveBay? drives = null, Cp500MachineProfile? profile = null)
+    public Cp500Automation(
+        ReadOnlySpan<byte> systemRom,
+        Cp500DriveBay? drives = null,
+        Cp500MachineProfile? profile = null,
+        byte[]? hardDiskImage = null,
+        Action<byte[]>? hardDiskWriteBack = null,
+        bool hardDiskHalt = false)
     {
         Drives = drives ?? new Cp500DriveBay();
         Machine = new Cp500Machine(profile ?? Cp500MachineProfile.Original, systemRom, Drives.Images);
+        if (hardDiskImage is not null)
+        {
+            FreHd = new FreHdDevice(hardDiskImage, hardDiskWriteBack, hardDiskHalt);
+            FreHd.Register(Machine.IoBus);
+        }
+
         if (Machine.Profile.InstalledDrives > 0 && !Drives.Images.IsMounted(0))
             Machine.ResetHoldingBreak();
     }
@@ -43,6 +55,12 @@ public sealed class Cp500Automation
 
     /// <summary>The disks the machine reads; flush it to write modified disks back.</summary>
     public Cp500DriveBay Drives { get; }
+
+    /// <summary>FreHD hard disk when the host attached one.</summary>
+    public FreHdDevice? FreHd { get; }
+
+    /// <summary>Writes a dirty hard disk image back when a write-back callback was supplied.</summary>
+    public void FlushHardDisk() => FreHd?.Flush();
 
     /// <summary>Z80 cycles executed since construction.</summary>
     public long ElapsedCycles { get; private set; }
