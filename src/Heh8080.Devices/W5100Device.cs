@@ -386,31 +386,84 @@ public sealed class W5100Device : IIoDevice
 
         private void DrainStream(bool allowClose)
         {
-            if (_stream is null)
+            if (_stream is null || _client is null)
                 return;
 
-            int avail = _client?.Available ?? 0;
-            if (avail <= 0)
+            var chunk = new byte[512];
+            bool gotData = false;
+            while (true)
             {
-                if (allowClose && _rxQueue.Count == 0 && IsPeerFinished())
-                    WriteStatus(SrClosed);
-                return;
-            }
+                int read;
+                try
+                {
+                    read = ReadPending(chunk);
+                }
+                catch (IOException)
+                {
+                    CloseIfDrained(allowClose);
+                    return;
+                }
+                catch (SocketException)
+                {
+                    CloseIfDrained(allowClose);
+                    return;
+                }
 
-            var chunk = new byte[Math.Min(avail, 512)];
-            int read = _stream.Read(chunk, 0, chunk.Length);
-            if (read <= 0)
+                if (read < 0)
+                {
+                    if (gotData)
+                        FlushTxToHost(_mem);
+                    return;
+                }
+
+                if (read == 0)
+                {
+                    if (gotData)
+                        FlushTxToHost(_mem);
+                    CloseIfDrained(allowClose);
+                    return;
+                }
+
+                gotData = true;
+                EnqueueRx(chunk.AsSpan(0, read));
+            }
+        }
+
+        /// <summary>
+        /// Bytes waiting on the socket, 0 at end of stream, or -1 when the read would block.
+        /// A readable socket with <see cref="Socket.Available"/> of 0 is not enough: Windows
+        /// reports that for a healthy connection and again when a payload arrived with FIN.
+        /// </summary>
+        private int ReadPending(byte[] buffer)
+        {
+            Socket socket = _client!.Client;
+            if (!socket.Poll(0, SelectMode.SelectRead))
+                return -1;
+
+            int available = socket.Available;
+            if (available > 0)
+                return _stream!.Read(buffer, 0, Math.Min(available, buffer.Length));
+
+            bool blocking = socket.Blocking;
+            socket.Blocking = false;
+            try
             {
-                if (_rxQueue.Count == 0)
-                    WriteStatus(SrClosed);
-                return;
+                return socket.Receive(buffer, 0, buffer.Length, SocketFlags.None);
             }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.WouldBlock)
+            {
+                return -1;
+            }
+            finally
+            {
+                socket.Blocking = blocking;
+            }
+        }
 
-            EnqueueRx(chunk.AsSpan(0, read));
-            if (_client?.Available > 0)
-                return;
-
-            FlushTxToHost(_mem);
+        private void CloseIfDrained(bool allowClose)
+        {
+            if (allowClose && _rxQueue.Count == 0)
+                WriteStatus(SrClosed);
         }
 
         private bool IsPeerFinished()
@@ -421,9 +474,30 @@ public sealed class W5100Device : IIoDevice
 
             try
             {
-                return socket.Poll(0, SelectMode.SelectRead) && socket.Available == 0;
+                if (!socket.Poll(0, SelectMode.SelectRead) || socket.Available > 0)
+                    return false;
+
+                bool blocking = socket.Blocking;
+                socket.Blocking = false;
+                try
+                {
+                    var probe = new byte[1];
+                    return socket.Receive(probe, 0, 1, SocketFlags.Peek) == 0;
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.WouldBlock)
+                {
+                    return false;
+                }
+                finally
+                {
+                    socket.Blocking = blocking;
+                }
             }
             catch (SocketException)
+            {
+                return true;
+            }
+            catch (ObjectDisposedException)
             {
                 return true;
             }
