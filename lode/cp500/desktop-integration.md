@@ -2,7 +2,9 @@
 
 The net10.0 Avalonia desktop app starts in the CP-500 at 100% scale when both
 ROMs are found, otherwise in the unchanged CP/M machine at 60%; `--cpm` forces
-CP/M. `ConfigDialog` switches between the two machines. At startup, `App` looks for the user-owned `cp500.rom` (16 KiB
+CP/M. `--disk <path>` inserts that image in drive 0 before the first reset,
+with the same write-back as a dialog mount. `ConfigDialog` switches between
+the two machines. At startup, `App` looks for the user-owned `cp500.rom` (16 KiB
 system ROM) and `cp500-chargen.rom` (2 KiB character generator) in
 `<app dir>/cp500/`, `<current dir>/cp500/` and `%LOCALAPPDATA%\heh8080\`. The
 files are read into memory and passed to `MainViewModel`; they are never an
@@ -105,7 +107,7 @@ look: a number prefix, a name label, Mount and Unmount buttons.
   protected and are never saved. Unmodified disks are never rewritten. The
   Desktop write-back writes a temp file and renames it over the original, and a
   failed save keeps the disk mounted and shows the error.
-- File IO stays in the Desktop project (`ConfigDialog`); the view model only
+- File IO stays in the Desktop project (`App` for `--disk`, `ConfigDialog` for the picker); the view model only
   takes bytes and a write-back delegate, so Browser can supply its own storage
   and still compiles against the same view model.
 

@@ -53,7 +53,7 @@ cp500/
 
 The repository's `.gitignore` excludes `cp500/*.rom`, so ROMs you put in `cp500/` at the repository root are never committed.
 
-When the app finds both files, it starts in the CP-500 at 100% scale. If a file is missing or the character generator is not exactly 2,048 bytes, the app starts in CP/M and the CP-500 option stays disabled. Use `--cpm` to start in CP/M anyway. Click the logo in the top-left corner of the bezel to switch machines or mount disks.
+When the app finds both files, it starts in the CP-500 at 100% scale. If a file is missing or the character generator is not exactly 2,048 bytes, the app starts in CP/M and the CP-500 option stays disabled. Use `--cpm` to start in CP/M anyway. `--disk <path>` mounts that image in CP-500 drive 0 before the machine boots, and writes it back when the disk changes. Click the logo in the top-left corner of the bezel to switch machines, attach RS-232, or mount disks.
 
 ### Using the CP-500
 

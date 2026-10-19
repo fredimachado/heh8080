@@ -51,10 +51,13 @@ public partial class App : Application
 
             if (startCp500)
             {
+                string? disk = DiskArgument(desktop.Args);
                 Dispatcher.UIThread.Post(async () =>
                 {
                     try
                     {
+                        if (disk != null)
+                            await MountCp500Disk(disk);
                         await _viewModel.SwitchMachine(EmulatedMachine.Cp500);
                     }
                     catch (Exception ex)
@@ -70,6 +73,31 @@ public partial class App : Application
         }
 
         base.OnFrameworkInitializationCompleted();
+    }
+
+    private static string? DiskArgument(string[]? args)
+    {
+        if (args == null)
+            return null;
+        int index = Array.IndexOf(args, "--disk");
+        if (index < 0 || index + 1 >= args.Length)
+            return null;
+        return Path.GetFullPath(args[index + 1]);
+    }
+
+    private async Task MountCp500Disk(string path)
+    {
+        byte[] image = await File.ReadAllBytesAsync(path);
+        bool readOnly = new FileInfo(path).IsReadOnly;
+        await _viewModel!.MountCp500Disk(
+            0, image, Path.GetFileName(path), saved => SaveAtomically(path, saved), readOnly);
+    }
+
+    private static void SaveAtomically(string path, byte[] contents)
+    {
+        string temporary = path + ".tmp";
+        File.WriteAllBytes(temporary, contents);
+        File.Move(temporary, path, overwrite: true);
     }
 
     private void MountBundledDisk(FileDiskImageProvider diskProvider)
