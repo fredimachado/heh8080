@@ -109,6 +109,13 @@ public sealed class Cp500Automation
         ArgumentNullException.ThrowIfNull(keys);
         foreach (Cp500KeyPress key in keys)
         {
+            if (key.RawByte is byte raw)
+            {
+                InjectKeyboardByte(raw);
+                Run(KeyGapDuration);
+                continue;
+            }
+
             Machine.Keyboard.SetKeyState(ShiftRow, ShiftColumn, key.Shift);
             Machine.Keyboard.SetKeyState(key.Row, key.Column, pressed: true);
             Run(KeyHoldDuration);
@@ -165,4 +172,22 @@ public sealed class Cp500Automation
 
     private long CyclesFor(TimeSpan duration) =>
         (long)Math.Round(duration.TotalSeconds * Machine.Profile.ClockHz);
+
+    /// <summary>Enqueues one byte on the guest keyboard ring, the same path as <c>kbd_put</c>.</summary>
+    private void InjectKeyboardByte(byte value)
+    {
+        const ushort headAddr = 0x4019;
+        const ushort tailAddr = 0x401A;
+        const ushort ringAddr = 0x4026;
+        const int ringSize = 32;
+
+        byte head = Machine.Memory.Read(headAddr);
+        byte tail = Machine.Memory.Read(tailAddr);
+        byte next = (byte)((head + 1) & (ringSize - 1));
+        if (next == tail)
+            return;
+
+        Machine.Memory.Write((ushort)(ringAddr + head), value);
+        Machine.Memory.Write(headAddr, next);
+    }
 }

@@ -4,7 +4,7 @@ namespace Heh8080.Devices;
 public readonly record struct Cp500KeyPress
 {
     /// <summary>Creates a key press. Row and column values are in the range 0-7.</summary>
-    public Cp500KeyPress(int row, int column, bool shift)
+    public Cp500KeyPress(int row, int column, bool shift, byte? rawByte = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(row);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(row, 7);
@@ -13,7 +13,11 @@ public readonly record struct Cp500KeyPress
         Row = row;
         Column = column;
         Shift = shift;
+        RawByte = rawByte;
     }
+
+    /// <summary>When set, injects this byte into the keyboard ring instead of pressing a matrix key.</summary>
+    public byte? RawByte { get; }
 
     /// <summary>Matrix row, 0-7.</summary>
     public int Row { get; }
@@ -48,7 +52,8 @@ public static class Cp500KeySequence
     ];
 
     /// <summary>Names accepted inside braces.</summary>
-    public static IEnumerable<string> KeyNames => NamedKeys.Select(entry => entry.Name);
+    public static IEnumerable<string> KeyNames =>
+        NamedKeys.Select(entry => entry.Name).Concat(["BS", "TAB"]);
 
     /// <summary>Parses text into the key presses that type it, in order.</summary>
     /// <exception cref="FormatException">
@@ -99,6 +104,12 @@ public static class Cp500KeySequence
 
     private static Cp500KeyPress Named(string name, int position)
     {
+        if (string.Equals("BS", name, StringComparison.OrdinalIgnoreCase))
+            return new Cp500KeyPress(0, 0, shift: false, rawByte: 0x08);
+
+        if (string.Equals("TAB", name, StringComparison.OrdinalIgnoreCase))
+            return new Cp500KeyPress(0, 0, shift: false, rawByte: 0x09);
+
         foreach (var (keyName, key) in NamedKeys)
         {
             if (string.Equals(keyName, name, StringComparison.OrdinalIgnoreCase))
