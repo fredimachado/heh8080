@@ -1,8 +1,12 @@
-# heh8080
+# heh8080 - CP-500
 
 Cross-platform Intel 8080 / Zilog Z80 CPU emulator designed to run LOLOS (a CP/M 2.2 compatible OS) and legacy Z80 software. The desktop app can also emulate the Prológica CP-500.
 
-![heh8080 screenshot](img/heh.jpeg)
+![CP-500 boot screen with the Prológica logo](img/cp500.jpeg)
+
+![CP-500 running cp500-os with a shell listing](img/cp500-os.jpeg)
+
+![DOS-500 boot screen asking for the date](img/dos500.jpeg)
 
 ## Features
 
@@ -14,8 +18,6 @@ Cross-platform Intel 8080 / Zilog Z80 CPU emulator designed to run LOLOS (a CP/M
 - **Responsive scaling**: 100%, 80%, 60%, 40% with platform-aware defaults
 
 ## Prológica CP-500
-
-![CP-500 boot screen with the Prológica logo](img/cp500.jpeg)
 
 The CP-500 is a Brazilian personal computer that Prológica built in the early 1980s. It is compatible with the TRS-80 Model III. heh8080 emulates the original configuration:
 
