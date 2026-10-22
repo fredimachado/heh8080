@@ -320,7 +320,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
             await _emulator.StopAsync();
             StopInterruptTimer();
-            _cp500Machine ??= new Cp500Machine(Cp500MachineProfile.Original, _cp500Rom!, _cp500Drives.Images);
+            if (_cp500Machine is null)
+            {
+                _cp500Machine = new Cp500Machine(Cp500MachineProfile.Original, _cp500Rom!, _cp500Drives.Images);
+                AttachW5100(_cp500Machine);
+            }
+
             _cp500Machine.SpeedFactor = Cp500SpeedFactor;
             ResetCp500Machine();
             ActiveMachine = machine;
@@ -546,6 +551,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             }));
             var machine = new Cp500Machine(
                 profile, _cp500Rom, _cp500Drives.Images, serial: rs232, hardDisk: hardDisk);
+            AttachW5100(machine);
             machine.SpeedFactor = Cp500SpeedFactor;
             _cp500Machine = machine;
             _cp500Serial = rs232.Endpoint;
@@ -699,4 +705,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             disposable.Dispose();
         }
     }
+
+    /// <summary>W5100 TCP board at D0h-D3h so guest <c>/bin/telnet</c> and sockets reach the host loopback.</summary>
+    private static void AttachW5100(Cp500Machine machine) =>
+        new W5100Device().Register(machine.IoBus);
 }
