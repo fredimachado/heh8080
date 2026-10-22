@@ -32,7 +32,7 @@ public sealed class Cp500DriveBay
         ArgumentException.ThrowIfNullOrEmpty(name);
         ValidateDrive(drive);
 
-        var parsed = ModelIIIDiskCodec.Parse(image, ModelIIIDiskCodec.DetectKind(name, image.Length));
+        var parsed = ModelIIIDiskCodec.Parse(image, ModelIIIDiskCodec.DetectKind(name, image));
         Flush(drive);
         Images.Mount(drive, parsed, readOnly);
         _entries[drive] = new DriveEntry(name, writeBack);

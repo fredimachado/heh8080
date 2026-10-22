@@ -43,6 +43,20 @@ public static class ModelIIIDiskCodec
             : ModelIIIDiskImageKind.Jv3;
     }
 
+    /// <summary>
+    /// Like <see cref="DetectKind(string, int)"/>, but a file whose extension does not name a container is
+    /// DMK when its header describes exactly its own length.
+    /// </summary>
+    public static ModelIIIDiskImageKind DetectKind(string fileName, ReadOnlySpan<byte> bytes)
+    {
+        string extension = Path.GetExtension(fileName);
+        bool namesContainer = extension.Equals(".dmk", StringComparison.OrdinalIgnoreCase) ||
+                              extension.Equals(".jv3", StringComparison.OrdinalIgnoreCase);
+        return !namesContainer && DmkFormat.LooksLikeDmk(bytes)
+            ? ModelIIIDiskImageKind.Dmk
+            : DetectKind(fileName, bytes.Length);
+    }
+
     private static ModelIIIDiskImage ParseRaw(ReadOnlySpan<byte> bytes)
     {
         var format = bytes.Length switch

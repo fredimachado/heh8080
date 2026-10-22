@@ -40,6 +40,30 @@ public sealed class Cp500DriveBayTests
         Assert.Equal(ModelIIIDiskImageKind.Jv3, ModelIIIDiskCodec.DetectKind("disk.dsk", length + 1));
     }
 
+    [Theory]
+    [InlineData("disk.dsk")]
+    [InlineData("disk.img")]
+    public void AFileWithADmkHeaderThatMatchesItsLengthIsDmkWhateverItIsCalled(string fileName)
+    {
+        byte[] dmk = ModelIIIDiskCodec.Serialize(
+            ModelIIIDiskImage.CreateBlank(ModelIIIDiskFormat.DoubleSided), ModelIIIDiskImageKind.Dmk);
+
+        Assert.Equal(ModelIIIDiskImageKind.Dmk, ModelIIIDiskCodec.DetectKind(fileName, dmk));
+        Assert.Equal(ModelIIIDiskImageKind.Jv3, ModelIIIDiskCodec.DetectKind(fileName, dmk.AsSpan(0, dmk.Length - 1)));
+        Assert.Equal(ModelIIIDiskImageKind.Jv3, ModelIIIDiskCodec.DetectKind("disk.jv3", dmk));
+    }
+
+    [Fact]
+    public void InsertMountsADmkImageNamedDsk()
+    {
+        byte[] dmk = ModelIIIDiskCodec.Serialize(
+            ModelIIIDiskImage.CreateBlank(ModelIIIDiskFormat.SingleSided), ModelIIIDiskImageKind.Dmk);
+
+        _bay.Insert(0, dmk, "dos.dsk", null);
+
+        Assert.True(_bay.Images.IsMounted(0));
+    }
+
     [Fact]
     public void InsertMountsTheImageAndRemembersItsName()
     {

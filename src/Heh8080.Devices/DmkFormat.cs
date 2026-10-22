@@ -22,6 +22,18 @@ internal static class DmkFormat
     private const ushort DoubleDensityPointerFlag = 0x8000;
     private const ushort PointerOffsetMask = 0x3FFF;
 
+    public static bool LooksLikeDmk(ReadOnlySpan<byte> bytes)
+    {
+        if (bytes.Length < HeaderBytes || bytes[0] is not (0 or WriteProtected))
+            return false;
+
+        int tracks = bytes[1];
+        int trackLength = bytes[2] | (bytes[3] << 8);
+        int sides = (bytes[4] & SingleSidedFlag) != 0 ? 1 : 2;
+        return tracks is > 0 and <= MaxFileTracks && trackLength > IdamTableBytes &&
+               HeaderBytes + (long)tracks * sides * trackLength == bytes.Length;
+    }
+
     public static ModelIIIDiskImage Parse(ReadOnlySpan<byte> bytes)
     {
         if (bytes.Length < HeaderBytes)
