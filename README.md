@@ -75,6 +75,7 @@ dotnet publish src/Heh8080.Desktop -c Release
 
 ## Projetos relacionados
 
+- [cp500-os](https://github.com/fredimachado/cp500-os): sistema operacional para o CP-500
 - [LOLOS](https://github.com/fjzeit/lolos): sistema operacional compatível com CP/M 2.2, escrito em assembly 8080
 
 ## Licença
