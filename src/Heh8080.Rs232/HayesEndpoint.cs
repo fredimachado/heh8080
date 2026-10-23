@@ -38,6 +38,8 @@ internal sealed class HayesEndpoint : ISerialEndpoint
     private int _rings;
     private int _plusCount;
     private long _quiet;
+    private bool _dtr;
+    private bool _rts = true;
     private bool _disposed;
 
     /// <summary>Binds <paramref name="port"/> on all interfaces. Port 0 asks the OS for a free port.</summary>
@@ -72,7 +74,7 @@ internal sealed class HayesEndpoint : ISerialEndpoint
         {
             ObserveDial();
             Drain();
-            if (_rx.Count == 0)
+            if (!_rts || _rx.Count == 0)
             {
                 value = 0;
                 return false;
@@ -127,6 +129,18 @@ internal sealed class HayesEndpoint : ISerialEndpoint
             DialAsync(request.Host, request.Port, request.Generation).GetAwaiter().GetResult();
             lock (_gate)
                 ObserveDial();
+        }
+    }
+
+    public void SetModemOutputs(ModemOutputs outputs)
+    {
+        lock (_gate)
+        {
+            bool wasDtr = _dtr;
+            _dtr = outputs.Dtr;
+            _rts = outputs.Rts;
+            if (wasDtr && !_dtr)
+                Hangup();
         }
     }
 

@@ -1,6 +1,9 @@
 namespace Heh8080.Devices;
 
 /// <summary>Modem-status pins the UART presents on E8h. One means the signal is true.</summary>
+/// <summary>DTR and RTS from the UART control word (EAh while E8h bit 1 is set).</summary>
+public readonly record struct ModemOutputs(bool Dtr, bool Rts);
+
 public readonly record struct ModemInputs(bool Cts, bool Dsr, bool Carrier, bool Ring, bool ReceiveMark)
 {
     /// <summary>No cable. The receiver idles at mark.</summary>
@@ -27,6 +30,9 @@ public interface ISerialEndpoint : IDisposable
 
     /// <summary>Counts emulated CPU cycles. A raw cable does nothing here.</summary>
     void AdvanceCycles(long cycles);
+
+    /// <summary>Reflects modem control outputs from the UART. Endpoints that ignore DTR/RTS use the default.</summary>
+    void SetModemOutputs(ModemOutputs outputs) { }
 }
 
 /// <summary>

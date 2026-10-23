@@ -80,6 +80,51 @@ public sealed class HayesEndpointTests
         Assert.False(modem.Inputs.Carrier);
     }
 
+    [Fact(Timeout = 5000)]
+    public async Task DtrDropHangsUpAnActiveCall()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Task<TcpClient> accepted = AcceptAfter(listener, release.Task);
+
+        using var modem = new HayesEndpoint(0, Clock);
+        modem.SetModemOutputs(new ModemOutputs(true, true));
+        Write(modem, $"ATDT127.0.0.1:{port}\r");
+        release.SetResult();
+        using TcpClient peer = await accepted;
+        WaitFor(modem, "CONNECT");
+        Assert.True(modem.Inputs.Carrier);
+
+        modem.SetModemOutputs(new ModemOutputs(false, true));
+        Assert.False(modem.Inputs.Carrier);
+        Assert.Contains("OK\r\n", Exchange(modem, "AT\r"));
+    }
+
+    [Fact(Timeout = 5000)]
+    public async Task RtsLowHoldsReceivedBytesUntilRtsRises()
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        using var modem = new HayesEndpoint(0, Clock);
+        modem.SetModemOutputs(new ModemOutputs(true, true));
+        Write(modem, $"ATDT127.0.0.1:{port}\r");
+        using TcpClient peer = await listener.AcceptTcpClientAsync();
+        WaitFor(modem, "CONNECT");
+        Read(modem);
+
+        modem.SetModemOutputs(new ModemOutputs(true, false));
+        await peer.GetStream().WriteAsync("X"u8.ToArray());
+        modem.AdvanceCycles(0);
+        Assert.False(modem.TryRead(out _));
+
+        modem.SetModemOutputs(new ModemOutputs(true, true));
+        Assert.True(modem.TryRead(out byte value));
+        Assert.Equal((byte)'X', value);
+    }
+
     [Fact]
     public void Ats0AnswersAnInboundCall()
     {

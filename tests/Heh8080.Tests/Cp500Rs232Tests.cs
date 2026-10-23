@@ -83,6 +83,19 @@ public sealed class Cp500Rs232Tests
     }
 
     [Fact]
+    public void ControlLoadPushesDtrAndRtsToTheEndpoint()
+    {
+        var (device, _, endpoint) = Board();
+
+        device.Out(0xE8, 0x02);
+        device.Out(0xEA, 0x03);
+        Assert.Equal(new ModemOutputs(true, true), endpoint.Outputs);
+
+        device.Out(0xEA, Cp500Rs232Device.ResetControl);
+        Assert.Equal(new ModemOutputs(false, false), endpoint.Outputs);
+    }
+
+    [Fact]
     public void ControlWriteIsIgnoredUntilE8Bit1IsSet()
     {
         var (device, bus, endpoint) = Board();
@@ -398,6 +411,10 @@ public sealed class Cp500Rs232Tests
         public List<byte> Written { get; } = [];
 
         public ModemInputs Inputs { get; set; } = ModemInputs.Idle;
+
+        public ModemOutputs Outputs { get; private set; }
+
+        public void SetModemOutputs(ModemOutputs outputs) => Outputs = outputs;
 
         public void Enqueue(byte value) => _incoming.Enqueue(value);
 

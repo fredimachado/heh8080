@@ -130,7 +130,15 @@ public sealed class Cp500Rs232Device : IIoDevice
         _txActive = false;
         _rxActive = false;
         _rxLineHigh = true;
+        NotifyModemOutputs();
         StatusChanged?.Invoke();
+    }
+
+    private void NotifyModemOutputs()
+    {
+        _endpoint?.SetModemOutputs(new ModemOutputs(
+            (_control & 0x01) != 0,
+            (_control & 0x02) != 0));
     }
 
     public byte In(byte port) => port switch
@@ -155,7 +163,11 @@ public sealed class Cp500Rs232Device : IIoDevice
                 break;
             case ControlPort:
                 if (_controlLoad)
+                {
                     _control = value;
+                    NotifyModemOutputs();
+                }
+
                 break;
             case DataPort:
                 _holding = value;
