@@ -120,7 +120,14 @@ internal sealed class HayesEndpoint : ISerialEndpoint
         }
 
         if (dial is { } request)
-            Observe(DialAsync(request.Host, request.Port, request.Generation));
+        {
+            // Finish the TCP dial before Write returns so CONNECT is already in
+            // _rx when the guest UART finishes the CR. An async dial races the
+            // guest's wait loop under turbo (emulated time << wall connect).
+            DialAsync(request.Host, request.Port, request.Generation).GetAwaiter().GetResult();
+            lock (_gate)
+                ObserveDial();
+        }
     }
 
     public void AdvanceCycles(long cycles)
@@ -201,33 +208,76 @@ internal sealed class HayesEndpoint : ISerialEndpoint
             return null;
         }
 
-        string rest = line[2..];
-        switch (rest)
+        // Compound AT lines (ATE0V1, ATE0S0=1, …). Dial must be last.
+        ReadOnlySpan<char> rest = line.AsSpan(2);
+        while (!rest.IsEmpty)
         {
-            case "":
-                Reply("OK");
-                return null;
-            case "Z":
-                ResetModem();
-                Reply("OK");
-                return null;
-            case "E0":
+            if (rest.StartsWith("E0", StringComparison.Ordinal))
+            {
                 _echo = false;
-                Reply("OK");
-                return null;
-            case "E1":
+                rest = rest[2..];
+                continue;
+            }
+
+            if (rest.StartsWith("E1", StringComparison.Ordinal))
+            {
                 _echo = true;
-                Reply("OK");
-                return null;
-            case "H":
-            case "H0":
+                rest = rest[2..];
+                continue;
+            }
+
+            if (rest.Length >= 2 && (rest[0] is 'V' or 'Q') && (rest[1] is '0' or '1'))
+            {
+                // Always verbose / results-on; accept so ATE0V1 from term/irc works.
+                rest = rest[2..];
+                continue;
+            }
+
+            if (rest.StartsWith("S0=", StringComparison.Ordinal))
+            {
+                rest = rest[3..];
+                int digits = 0;
+                while (digits < rest.Length && char.IsAsciiDigit(rest[digits]))
+                    digits++;
+                if (digits == 0 || !byte.TryParse(rest[..digits], NumberStyles.None, CultureInfo.InvariantCulture, out byte n))
+                {
+                    Reply("ERROR");
+                    return null;
+                }
+
+                _s0 = n;
+                rest = rest[digits..];
+                if (_inbound is not null && _s0 >= 1 && _rings >= _s0)
+                {
+                    Answer();
+                    return null;
+                }
+
+                continue;
+            }
+
+            if (rest.StartsWith("Z", StringComparison.Ordinal))
+            {
+                ResetModem();
+                rest = rest[1..];
+                continue;
+            }
+
+            if (rest is "H" or "H0")
+            {
                 Hangup();
                 Reply("OK");
                 return null;
-            case "H1":
+            }
+
+            if (rest is "H1")
+            {
                 Reply("ERROR");
                 return null;
-            case "O":
+            }
+
+            if (rest is "O")
+            {
                 if (_stream is not null)
                 {
                     EnterData();
@@ -239,21 +289,33 @@ internal sealed class HayesEndpoint : ISerialEndpoint
                 }
 
                 return null;
-            case "A":
+            }
+
+            if (rest is "A")
+            {
                 if (_inbound is not null)
                     Answer();
                 else
                     Reply("NO CARRIER");
                 return null;
-            default:
-                if (rest.StartsWith("DT", StringComparison.Ordinal))
-                    return BeginDial(rest[2..]);
-                if (rest.StartsWith("S0=", StringComparison.Ordinal))
-                    SetS0(rest[3..]);
-                else
-                    Reply("ERROR");
-                return null;
+            }
+
+            if (rest.StartsWith("DT", StringComparison.Ordinal) ||
+                rest.StartsWith("D", StringComparison.Ordinal) && rest.Length > 1 && rest[1] is not 'T')
+            {
+                // ATDT, ATD, ATDP host:port
+                ReadOnlySpan<char> target = rest.StartsWith("DT", StringComparison.Ordinal) || rest.StartsWith("DP", StringComparison.Ordinal)
+                    ? rest[2..]
+                    : rest[1..];
+                return BeginDial(target.ToString());
+            }
+
+            Reply("ERROR");
+            return null;
         }
+
+        Reply("OK");
+        return null;
     }
 
     private void ResetModem()

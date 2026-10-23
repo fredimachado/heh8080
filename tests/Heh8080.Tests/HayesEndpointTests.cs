@@ -20,10 +20,12 @@ public sealed class HayesEndpointTests
         Assert.Equal("AT\rOK\r\n", Exchange(modem, "AT\r"));
         Assert.Equal("ATE0\rOK\r\n", Exchange(modem, "ATE0\r"));
         Assert.Equal("OK\r\n", Exchange(modem, "AT\r"));
+        Assert.Equal("OK\r\n", Exchange(modem, "ATE0V1\r"));
         Assert.Equal("OK\r\n", Exchange(modem, "ATZ\r"));
         Assert.Equal("AT\rOK\r\n", Exchange(modem, "AT\r"));
-        Assert.Equal("ATE0S0=1\rERROR\r\n", Exchange(modem, "ATE0S0=1\r"));
-        Assert.Equal("ATDT99999\rERROR\r\n", Exchange(modem, "ATDT99999\r"));
+        Assert.Equal("ATE0S0=1\rOK\r\n", Exchange(modem, "ATE0S0=1\r"));
+        Assert.Equal("OK\r\n", Exchange(modem, "ATS0=0\r"));
+        Assert.Equal("ERROR\r\n", Exchange(modem, "ATDT99999\r"));
     }
 
     [Fact(Timeout = 5000)]

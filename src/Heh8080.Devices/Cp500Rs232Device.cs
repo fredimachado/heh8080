@@ -229,6 +229,12 @@ public sealed class Cp500Rs232Device : IIoDevice
 
     private bool TryStartReceive()
     {
+        // Buffered endpoints (Hayes) keep bytes in their own queue. Do not pull the
+        // next one while DAV still holds an unread byte, or the guest loses the rest
+        // to overrun during a long SYS_WRITE / poll sleep.
+        if (_dav)
+            return false;
+
         ModemInputs inputs = _endpoint?.Inputs ?? ModemInputs.Idle;
         if (!inputs.ReceiveMark)
             BeginReceive(0, breakFrame: true);
