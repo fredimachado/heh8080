@@ -22,20 +22,20 @@ Cross-platform Intel 8080 / Zilog Z80 CPU emulator designed to run LOLOS (a CP/M
 ## Project Structure
 ```
 src/
-  Heh8080.Core/      # Cpu8080, CpuZ80, memory, I/O bus (net10.0;net9.0-browser)
-  Heh8080.Devices/   # FDC, console, MMU, printer, auxiliary, timer (net10.0;net9.0-browser)
-  Heh8080.Terminal/  # FJM-3A terminal emulator (net10.0;net9.0-browser)
-  Heh8080.App/       # Shared UI library: ViewModels, Views, Controls (net10.0;net9.0-browser)
+  Heh8080.Core/      # Cpu8080, CpuZ80, memory, I/O bus (net10.0;net10.0-browser)
+  Heh8080.Devices/   # FDC, console, MMU, printer, auxiliary, timer (net10.0;net10.0-browser)
+  Heh8080.Terminal/  # FJM-3A terminal emulator (net10.0;net10.0-browser)
+  Heh8080.App/       # Shared UI library: ViewModels, Views, Controls (net10.0;net10.0-browser)
   Heh8080.Mcp/       # MCP server for AI-assisted development (net10.0)
   Heh8080.Desktop/   # Desktop entry point with Avalonia UI (net10.0, NativeAOT)
-  Heh8080.Browser/   # Browser entry point with Avalonia WASM (net9.0-browser)
+  Heh8080.Browser/   # Browser entry point with Avalonia WASM (net10.0-browser)
 tests/
   Heh8080.Tests/     # Unit and integration tests (72 total)
   cpu_tests/         # External test suites (8080: TST8080, 8080PRE, CPUTEST, 8080EXM; Z80: ZEXDOC, ZEXALL)
 ```
 
 ## Current Status
-All phases complete (1-8) plus Z80 support. Emulator runs LOLOS on desktop (net10.0 NativeAOT) and browser (net9.0 WASM).
+All phases complete (1-8) plus Z80 support. Emulator runs LOLOS on desktop (net10.0 NativeAOT) and browser (net10.0 WASM).
 
 ### Completed
 - **Phase 1**: Solution skeleton with all projects
@@ -84,7 +84,7 @@ All phases complete (1-8) plus Z80 support. Emulator runs LOLOS on desktop (net1
   - CPU type selection in ConfigDialog (Z80 default, 8080 available)
   - ZEXDOC/ZEXALL test suites integrated (first test passes)
 - **Phase 7**: Platform integration complete:
-  - Multi-targeted libraries: Core, Devices, Terminal, App (net10.0;net9.0-browser)
+  - Multi-targeted libraries: Core, Devices, Terminal, App (net10.0;net10.0-browser)
   - All libraries marked `<IsTrimmable>true</IsTrimmable>` and `<IsAotCompatible>true</IsAotCompatible>`
   - Shared UI library (Heh8080.App): MainViewModel, MainView, RetroTerminalControl
   - Browser entry point (Heh8080.Browser): Avalonia WASM with WebGL rendering
@@ -108,8 +108,8 @@ The emulator is feature-complete and tested. Future enhancements could include:
 - Additional classic software testing (BBC BASIC, Colossal Cave, etc.)
 
 ## Build Notes
-- Libraries target `net10.0;net9.0-browser` for cross-platform support
+- Libraries target `net10.0;net10.0-browser` for cross-platform support
 - Desktop (net10.0) uses NativeAOT - all code must be AoT-compatible
-- Browser (net9.0-browser) uses WASM with `browser-wasm` RuntimeIdentifier
+- Browser (net10.0-browser) uses WASM with `browser-wasm` RuntimeIdentifier
 - Central package management via `Directory.Packages.props`
 - Directory.Build.props removed TargetFramework to allow per-project targeting

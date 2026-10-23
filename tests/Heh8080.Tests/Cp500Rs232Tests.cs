@@ -183,24 +183,24 @@ public sealed class Cp500Rs232Tests
     }
 
     [Fact]
-    public void OverrunKeepsTheFirstByteUntilTheNextStopBit()
+    public void QueuedBytesWaitUntilDavIsClearedInsteadOfOverrunning()
     {
+        // The UART must not pull the next endpoint byte while DAV still holds an
+        // unread value, or buffered hosts (Hayes) lose data during long guest polls.
         var (device, bus, endpoint) = Board();
         endpoint.Enqueue(0x11);
         endpoint.Enqueue(0x22);
 
-        device.AdvanceCycles(311);
-        Assert.Equal(0xC7, bus.In(0xEA));
-        device.AdvanceCycles(1);
-        Assert.Equal(0xE7, bus.In(0xEA));
-        Assert.Equal(0xE7, bus.In(0xEA));
-        Assert.Equal(0x11, bus.In(0xEB));
-        Assert.Equal(0x67, bus.In(0xEA));
-
-        endpoint.Enqueue(0x33);
         device.AdvanceCycles(160);
         Assert.Equal(0xC7, bus.In(0xEA));
-        Assert.Equal(0x33, bus.In(0xEB));
+        device.AdvanceCycles(160);
+        Assert.Equal(0xC7, bus.In(0xEA));
+        Assert.Equal(0x11, bus.In(0xEB));
+        Assert.Equal(0x47, bus.In(0xEA));
+
+        device.AdvanceCycles(160);
+        Assert.Equal(0xC7, bus.In(0xEA));
+        Assert.Equal(0x22, bus.In(0xEB));
         Assert.Equal(0x47, bus.In(0xEA));
     }
 

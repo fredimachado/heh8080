@@ -19,7 +19,7 @@ src/Heh8080.Browser/
 
 ## Target Framework
 
-- `net9.0-browser` with `RuntimeIdentifier=browser-wasm`
+- `net10.0-browser` with `RuntimeIdentifier=browser-wasm`
 - Single-threaded execution (no real threads)
 - References shared `Heh8080.App` library (multi-targeted)
 

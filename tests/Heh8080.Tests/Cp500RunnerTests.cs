@@ -143,7 +143,7 @@ public sealed class Cp500RunnerTests : IDisposable
     [InlineData(new[] { "--rom", "a", "--timeout", "1s", "--timeout", "2s" }, "--timeout was given more than once.")]
     [InlineData(new[] { "--rom", "a", "--until-screen", "" }, "--until-screen needs non-empty text.")]
     [InlineData(new[] { "--rom", "a", "--type", "a^" }, "--type \"a^\": The CP-500 keyboard has no key for '^' (position 1).")]
-    [InlineData(new[] { "--rom", "a", "--type", "{F1}" }, "--type \"{F1}\": Unknown key '{F1}' at position 0; known keys: ENTER, CLEAR, BREAK, UP, DOWN, LEFT, RIGHT, SPACE.")]
+    [InlineData(new[] { "--rom", "a", "--type", "{F1}" }, "--type \"{F1}\": Unknown key '{F1}' at position 0; known keys: ENTER, CLEAR, BREAK, UP, DOWN, LEFT, RIGHT, SPACE, BS, TAB.")]
     [InlineData(new[] { "--rom", "a", "--dump-memory", "4300" }, "--dump-memory needs <hex address>:<length>, such as 4300:256, not '4300'.")]
     [InlineData(new[] { "--rom", "a", "--dump-memory", "FFFF:2" }, "--dump-memory 'FFFF:2': the length must be 1 to 1 bytes from FFFFh.")]
     [InlineData(new[] { "--rom", "a", "--rs232", "tcp:a:b:1" }, "RS-232 link must be off | tcp:<host>:<port> | listen:<port> | hayes:<port> | com:<name>.")]

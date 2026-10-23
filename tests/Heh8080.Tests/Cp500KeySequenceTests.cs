@@ -47,7 +47,7 @@ public sealed class Cp500KeySequenceTests
     [Theory]
     [InlineData(@"\n", @"Unknown escape '\n' at position 0; use \r or \\.")]
     [InlineData(@"ab\", @"The text ends with a lone '\'; write '\\' for a backslash.")]
-    [InlineData("{HOME}", "Unknown key '{HOME}' at position 0; known keys: ENTER, CLEAR, BREAK, UP, DOWN, LEFT, RIGHT, SPACE.")]
+    [InlineData("{HOME}", "Unknown key '{HOME}' at position 0; known keys: ENTER, CLEAR, BREAK, UP, DOWN, LEFT, RIGHT, SPACE, BS, TAB.")]
     [InlineData("x{ENTER", "Unclosed '{' at position 1.")]
     [InlineData("a^", "The CP-500 keyboard has no key for '^' (position 1).")]
     [InlineData(@"\\", @"The CP-500 keyboard has no key for '\' (position 1).")]

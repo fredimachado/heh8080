@@ -1,5 +1,6 @@
 # Build NativeAOT release binaries for Desktop and the CP-500 headless runner,
-# zip each publish tree, and attach them to a GitHub Release.
+# plus the Avalonia WebAssembly AppBundle, zip each publish tree, and attach
+# them to a GitHub Release.
 #
 # Trigger: push a version tag such as v1.0 or v1.2.3
 #   git tag v1.0
@@ -140,9 +141,66 @@ jobs:
           path: artifacts/*.zip
           if-no-files-found: error
 
+  build-wasm:
+    name: Build browser-wasm
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install wasm-tools
+        run: dotnet workload install wasm-tools --skip-manifest-update
+
+      - name: Resolve version from tag
+        id: version
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          if [[ -z "$VERSION" ]]; then
+            echo "Tag '${REF_NAME}' did not yield a version after stripping a leading v."
+            exit 1
+          fi
+          echo "tag=${REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Browser
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          dotnet publish src/Heh8080.Browser/Heh8080.Browser.csproj \
+            -c Release \
+            -p:Version="$VERSION" \
+            -p:InformationalVersion="$VERSION" \
+            -p:IncludeSourceRevisionInInformationalVersion=false
+          BUNDLE="src/Heh8080.Browser/bin/Release/net10.0-browser/browser-wasm/AppBundle"
+          test -d "$BUNDLE"
+          mkdir -p artifacts
+          (
+            cd "$BUNDLE"
+            zip -r "${GITHUB_WORKSPACE}/artifacts/Heh8080.Browser-${TAG}-browser-wasm.zip" .
+          )
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-browser-wasm
+          path: artifacts/*.zip
+          if-no-files-found: error
+
   release:
     name: Create GitHub Release
-    needs: build
+    needs: [build, build-wasm]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts

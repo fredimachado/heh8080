@@ -214,7 +214,7 @@ heh8080/
 9. ✓ **Verified**: MBASIC 5.29 (24KB, multi-extent) loads and runs correctly
 
 ### Phase 7: Platform Integration ✓
-1. ✓ Multi-targeted all libraries: Core, Devices, Terminal, App (`net10.0;net9.0-browser`)
+1. ✓ Multi-targeted all libraries: Core, Devices, Terminal, App (`net10.0;net10.0-browser`)
 2. ✓ Added AoT compatibility: `<IsTrimmable>true</IsTrimmable>`, `<IsAotCompatible>true</IsAotCompatible>`
 3. ✓ Created shared UI library (Heh8080.App):
    - MainViewModel with IDiskImageProvider abstraction
