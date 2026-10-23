@@ -1,5 +1,4 @@
-# Build NativeAOT release binaries for Desktop and the CP-500 headless runner,
-# plus the Avalonia WebAssembly AppBundle, zip each publish tree, and attach
+# Build NativeAOT release binaries for Desktop, plus the Avalonia WebAssembly AppBundle, zip each publish tree, and attach
 # them to a GitHub Release.
 #
 # Trigger: push a version tag such as v1.0 or v1.2.3
@@ -87,21 +86,6 @@ jobs:
             -p:InformationalVersion="$VERSION" \
             -p:IncludeSourceRevisionInInformationalVersion=false
 
-      - name: Publish CP-500 runner
-        shell: bash
-        env:
-          RID: ${{ matrix.rid }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          dotnet publish src/Heh8080.Cp500Runner/Heh8080.Cp500Runner.csproj \
-            -c Release \
-            -r "$RID" \
-            -o "publish/runner/$RID" \
-            -p:Version="$VERSION" \
-            -p:InformationalVersion="$VERSION" \
-            -p:IncludeSourceRevisionInInformationalVersion=false
-
       - name: Zip artifacts (Unix)
         if: runner.os != 'Windows'
         shell: bash
@@ -115,10 +99,6 @@ jobs:
             cd "publish/desktop/$RID"
             zip -r "../../../artifacts/Heh8080.Desktop-${TAG}-${RID}.zip" .
           )
-          (
-            cd "publish/runner/$RID"
-            zip -r "../../../artifacts/heh8080-cp500-${TAG}-${RID}.zip" .
-          )
 
       - name: Zip artifacts (Windows)
         if: runner.os == 'Windows'
@@ -131,8 +111,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts | Out-Null
           Compress-Archive -Path "publish/desktop/$env:RID\*" `
             -DestinationPath "artifacts/Heh8080.Desktop-$env:TAG-$env:RID.zip"
-          Compress-Archive -Path "publish/runner/$env:RID\*" `
-            -DestinationPath "artifacts/heh8080-cp500-$env:TAG-$env:RID.zip"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

@@ -94,4 +94,4 @@ Full contract: [lode/cp500/headless-runner.md](lode/cp500/headless-runner.md).
 
 ## Releases
 
-Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds NativeAOT zips (win-x64, linux-x64, osx-arm64) for the desktop app and `heh8080-cp500` and creates a GitHub Release. The tag without the `v` becomes the assembly version (`heh8080-cp500 --version`). Only tag when the user asks.
+Pushing a `v*` tag triggers `.github/workflows/release.yml`, which builds NativeAOT zips (win-x64, linux-x64, osx-arm64, osx-x64) for the desktop app plus the WASM browser bundle, and creates a GitHub Release. The headless runner (`heh8080-cp500`) is not released; build it from source. The tag without the `v` becomes the assembly version. Only tag when the user asks.
