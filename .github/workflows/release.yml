@@ -1,0 +1,160 @@
+# Build NativeAOT release binaries for Desktop and the CP-500 headless runner,
+# zip each publish tree, and attach them to a GitHub Release.
+#
+# Trigger: push a version tag such as v1.0 or v1.2.3
+#   git tag v1.0
+#   git push origin v1.0
+#
+# The tag (without the leading v) is passed as Version / InformationalVersion so
+# the binaries report it (heh8080-cp500 --version, and PE/file version metadata).
+
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.rid }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            rid: win-x64
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: macos-latest
+            rid: osx-arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Install NativeAOT prerequisites (Linux)
+        if: runner.os == "Linux"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      - name: Resolve version from tag
+        id: version
+        shell: bash
+        env:
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${REF_NAME#v}"
+          if [[ -z "$VERSION" ]]; then
+            echo "Tag '${REF_NAME}' did not yield a version after stripping a leading v."
+            exit 1
+          fi
+          echo "tag=${REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish Desktop
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          dotnet publish src/Heh8080.Desktop/Heh8080.Desktop.csproj \
+            -c Release \
+            -r "$RID" \
+            -o "publish/desktop/$RID" \
+            -p:Version="$VERSION" \
+            -p:InformationalVersion="$VERSION" \
+            -p:IncludeSourceRevisionInInformationalVersion=false
+
+      - name: Publish CP-500 runner
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          dotnet publish src/Heh8080.Cp500Runner/Heh8080.Cp500Runner.csproj \
+            -c Release \
+            -r "$RID" \
+            -o "publish/runner/$RID" \
+            -p:Version="$VERSION" \
+            -p:InformationalVersion="$VERSION" \
+            -p:IncludeSourceRevisionInInformationalVersion=false
+
+      - name: Zip artifacts (Unix)
+        if: runner.os != "Windows"
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          (
+            cd "publish/desktop/$RID"
+            zip -r "../../../artifacts/Heh8080.Desktop-${TAG}-${RID}.zip" .
+          )
+          (
+            cd "publish/runner/$RID"
+            zip -r "../../../artifacts/heh8080-cp500-${TAG}-${RID}.zip" .
+          )
+
+      - name: Zip artifacts (Windows)
+        if: runner.os == "Windows"
+        shell: pwsh
+        env:
+          RID: ${{ matrix.rid }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Compress-Archive -Path "publish/desktop/$env:RID\*" `
+            -DestinationPath "artifacts/Heh8080.Desktop-$env:TAG-$env:RID.zip"
+          Compress-Archive -Path "publish/runner/$env:RID\*" `
+            -DestinationPath "artifacts/heh8080-cp500-$env:TAG-$env:RID.zip"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.rid }}
+          path: artifacts/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          pattern: binaries-*
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          files: release-assets/*.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -117,6 +117,17 @@ dotnet publish src/Heh8080.Browser -c Release
 dotnet publish src/Heh8080.Cp500Runner -c Release
 ```
 
+## Releases
+
+Push a version tag on this branch to build NativeAOT zip archives (Windows x64, Linux x64, macOS arm64) for the desktop app and `heh8080-cp500`, then create a GitHub Release:
+
+```bash
+git tag v1.0
+git push origin v1.0
+```
+
+The tag (without the leading `v`) is embedded as the assembly version. Check the runner with `heh8080-cp500 --version`.
+
 ## Related Projects
 
 - **LOLOS**: https://github.com/fjzeit/lolos - CP/M 2.2 compatible OS in pure 8080 assembly

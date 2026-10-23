@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Reflection;
 using System.Text;
 using Heh8080.Cp500Runner;
 using Heh8080.Devices;
@@ -254,6 +255,19 @@ public sealed class Cp500RunnerTests : IDisposable
 
         Assert.Equal(RunnerExitCode.Success, result.ExitCode);
         Assert.StartsWith("Usage: heh8080-cp500 --rom <path> [options] [steps]\n", result.Stdout);
+    }
+
+    [Fact]
+    public void VersionPrintsAssemblyInformationalVersionAndSucceeds()
+    {
+        string expected = typeof(RunnerCommand).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
+            .InformationalVersion;
+
+        var result = Run("--version");
+
+        Assert.Equal(RunnerExitCode.Success, result.ExitCode);
+        Assert.Equal(expected + "\n", result.Stdout);
     }
 
     [Fact]

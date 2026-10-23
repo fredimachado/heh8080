@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Reflection;
 using System.Text;
 using Heh8080.Devices;
 using Heh8080.Rs232;
@@ -39,6 +40,9 @@ public static class RunnerCommand
             {
                 case ShowHelp:
                     stdout.WriteLine(CommandLine.Usage);
+                    return RunnerExitCode.Success;
+                case ShowVersion:
+                    stdout.WriteLine(AppVersion);
                     return RunnerExitCode.Success;
                 case RunMachine run:
                     return Run(run, stdout, stderr);
@@ -203,4 +207,23 @@ public static class RunnerCommand
 
     private static string Seconds(TimeSpan duration) =>
         duration.TotalSeconds.ToString("0.###", CultureInfo.InvariantCulture) + "s";
+
+    /// <summary>
+    /// Version embedded at publish time (<c>-p:InformationalVersion</c> / <c>-p:Version</c>), for example from a
+    /// release tag <c>v1.0</c>.
+    /// </summary>
+    private static string AppVersion
+    {
+        get
+        {
+            string? informational = typeof(RunnerCommand).Assembly
+                .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+                ?.InformationalVersion;
+            if (!string.IsNullOrEmpty(informational))
+                return informational;
+
+            Version? assemblyVersion = typeof(RunnerCommand).Assembly.GetName().Version;
+            return assemblyVersion?.ToString() ?? "0.0.0";
+        }
+    }
 }

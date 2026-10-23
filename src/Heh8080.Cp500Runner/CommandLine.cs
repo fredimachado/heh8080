@@ -18,6 +18,10 @@ internal static class CommandLine
         Boots a CP-500 from a system ROM and runs the steps in order, as fast as the host allows.
         Time is emulated Z80 cycles only, so every run is reproducible.
 
+        Info:
+          -h, --help                Show this help and exit.
+          -V, --version             Show the version and exit.
+
         Machine:
           --rom <path>              System ROM image (required).
           --disk0 .. --disk3 <path> Disk image for a drive: raw, JV3 or DMK.
@@ -71,6 +75,8 @@ internal static class CommandLine
             {
                 case "-h" or "--help":
                     return new ShowHelp();
+                case "-V" or "--version":
+                    return new ShowVersion();
                 case "--rom":
                     rom = Once(rom, option, Value(args, ref i));
                     break;

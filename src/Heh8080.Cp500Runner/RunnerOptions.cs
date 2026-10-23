@@ -42,6 +42,9 @@ internal abstract record ParsedCommandLine;
 /// <summary>Print the usage text.</summary>
 internal sealed record ShowHelp : ParsedCommandLine;
 
+/// <summary>Print the assembly informational version.</summary>
+internal sealed record ShowVersion : ParsedCommandLine;
+
 /// <summary>Boot the machine and run the steps.</summary>
 internal sealed record RunMachine(
     string RomPath,
