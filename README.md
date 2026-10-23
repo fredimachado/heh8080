@@ -1,50 +1,39 @@
 # heh8080 - CP-500
 
-Cross-platform Intel 8080 / Zilog Z80 CPU emulator designed to run LOLOS (a CP/M 2.2 compatible OS) and legacy Z80 software. The desktop app can also emulate the Prológica CP-500.
+Emulador do Prológica CP-500, o computador brasileiro compatível com o TRS-80 Modelo III. Também emula as CPUs Intel 8080 e Zilog Z80 e roda o LOLOS, um sistema operacional compatível com CP/M 2.2.
 
-![CP-500 boot screen with the Prológica logo](img/cp500.jpeg)
+Funciona no Windows, Mac, Linux e no navegador.
 
-![CP-500 running cp500-os with a shell listing](img/cp500-os.jpeg)
+![Tela de boot do CP-500 com o logo da Prológica](img/cp500.jpeg)
 
-![DOS-500 boot screen asking for the date](img/dos500.jpeg)
+![CP-500 rodando o cp500-os com uma listagem no shell](img/cp500-os.jpeg)
 
-## Features
+![Tela de boot do DOS-500 pedindo a data](img/dos500.jpeg)
 
-- **Dual CPU support**: Intel 8080 and Zilog Z80
-- **CP/M compatible I/O**: Console, FDC, MMU, printer, auxiliary, timer
-- **Prológica CP-500 machine** (desktop): Brazilian TRS-80 Model III compatible, booted from your own ROM dumps (ROMs not provided, see [ROM files](#rom-files))
-- **Retro CRT terminal**: Authentic 1970s aesthetic with barrel distortion, bloom, scanlines, and vignette
-- **Cross-platform**: Windows, Mac, Linux (NativeAOT), Web (WASM)
-- **Responsive scaling**: 100%, 80%, 60%, 40% with platform-aware defaults
+## O que o emulador faz
 
-## Prológica CP-500
+- Emula o CP-500 original: Z80 a 2,03 MHz, 48 KB de RAM, tela de 64 x 16 com acentos, semigráficos e katakana, e até quatro drives de disquete
+- Abre disquetes `.dsk`, `.dmk` e `.jv3`, e salva o que for gravado neles
+- Também roda CP/M (LOLOS) com CPU 8080 ou Z80
+- Tela de monitor CRT antigo, com curvatura, brilho e linhas de varredura
 
-The CP-500 is a Brazilian personal computer that Prológica built in the early 1980s. It is compatible with the TRS-80 Model III. heh8080 emulates the original configuration:
+## Como baixar
 
-- Zilog Z80 at 2.03 MHz with 48 KB of RAM
-- 64 x 16 text screen drawn from the real character generator ROM, including the Portuguese letters, 2 x 3 block graphics and katakana
-- WD1791 floppy controller with up to four drives, of which two are installed
-- 30 Hz timer interrupt, keyboard matrix, printer port and real-time clock
+Baixe o arquivo do seu sistema na página de [Releases](https://github.com/fredimachado/heh8080/releases), descompacte e rode `Heh8080.Desktop`.
 
-### ROM files
+## ROMs do CP-500
 
 > [!IMPORTANT]
-> The CP-500 ROMs are not provided with heh8080, and this repository does not contain them. To use the CP-500, you must supply dumps of your own ROMs.
+> As ROMs do CP-500 não vêm com o emulador. Você precisa usar cópias (dumps) das suas próprias ROMs.
 
-The app needs two ROM files. Rename your dumps to exactly these names, in lowercase:
+Renomeie seus arquivos para exatamente estes nomes, em minúsculas:
 
-| File name | Size | Contents |
+| Arquivo | Tamanho | Conteúdo |
 |---|---|---|
-| `cp500.rom` | 16,384 bytes | System ROM (BASIC and boot code) |
-| `cp500-chargen.rom` | 2,048 bytes | Character generator |
+| `cp500.rom` | 16.384 bytes | ROM do sistema (BASIC e boot) |
+| `cp500-chargen.rom` | 2.048 bytes | Gerador de caracteres |
 
-Put both files in the same folder. The app looks in these folders, in this order:
-
-1. A `cp500` folder next to the executable (`Heh8080.Desktop.exe`, or `Heh8080.Desktop` on Mac and Linux)
-2. A `cp500` folder in the current directory, for example the repository root when you run `dotnet run --project src/Heh8080.Desktop`
-3. Your local app data folder, `%LOCALAPPDATA%\heh8080\` on Windows (the files go directly in it, without a `cp500` subfolder)
-
-For example, a portable install looks like this:
+Coloque os dois numa pasta `cp500` ao lado do executável:
 
 ```
 Heh8080.Desktop.exe
@@ -53,85 +42,41 @@ cp500/
   cp500-chargen.rom
 ```
 
-The repository's `.gitignore` excludes `cp500/*.rom`, so ROMs you put in `cp500/` at the repository root are never committed.
+Se o emulador encontrar as ROMs, ele já abre no CP-500. Se não encontrar, abre no CP/M.
 
-When the app finds both files, it starts in the CP-500 at 100% scale. If a file is missing or the character generator is not exactly 2,048 bytes, the app starts in CP/M and the CP-500 option stays disabled. Use `--cpm` to start in CP/M anyway. `--disk <path>` mounts that image in CP-500 drive 0 before the machine boots, and writes it back when the disk changes. Click the logo in the top-left corner of the bezel to switch machines, attach RS-232, or mount disks.
+> [!TIP]
+> No Windows, as ROMs também podem ficar direto em `%LOCALAPPDATA%\heh8080\`, sem a subpasta `cp500`.
 
-### Using the CP-500
+## Como usar o CP-500
 
-- With no disk in drive 0, the machine goes to `BASIC (S ou N)?`. Type `S`, then press Enter at `Cass?` and at `Mem. usada ?` to get the `READY` prompt.
-- With a bootable disk in drive 0 (TRS-DOS, DOS-500 and similar), the machine boots from the disk. Disk images can be `.dsk`, `.dmk` or `.jv3`. A disk that the machine writes to is saved back to its file.
-- Esc is BREAK, Home is CLEAR, and Backspace is the left arrow, which erases.
+- **Sem disquete**: a máquina pergunta `BASIC (S ou N)?`. Digite `S` e aperte Enter em `Cass?` e em `Mem. usada ?` para chegar ao `READY`.
+- **Com disquete**: com um disco de boot no drive 0 (TRS-DOS, DOS-500 etc.), a máquina dá boot por ele.
+- **Trocar de máquina ou de disquete**: clique no logo no canto superior esquerdo da moldura.
+- **Teclas**: Esc é BREAK, Home é CLEAR e Backspace é a seta para a esquerda (apaga).
 
-### Headless runner
+Opções de linha de comando:
 
-`heh8080-cp500` runs the CP-500 from the command line with no window, for tests and CI. It boots a ROM and up to four disks, runs the steps you give it in order, as fast as your computer allows, and exits with a code you can check. Emulated time counts Z80 cycles only, so every run gives the same result.
+- `--disk <arquivo>` coloca um disquete no drive 0 antes do boot.
+- `--cpm` abre no CP/M mesmo que as ROMs estejam presentes.
 
-```bash
-dotnet run --project src/Heh8080.Cp500Runner -- --rom cp500/cp500.rom \
-  --until-screen "BASIC (S ou N)" --type 'S\r\r' --until-screen READY \
-  --type 'PRINT 2+3\r' --until-screen " 5" --dump-screen
-```
+## Como compilar
 
-- Steps: `--until-screen <text>` waits for text on the screen, `--type <text>` types it (`\r` is Enter, `{BREAK}`, `{CLEAR}` and the arrows are named in braces), `--run <duration>` runs for a while (`500ms`, `30s`, `2m`).
-- `--disk0` to `--disk3` mount `.dsk`, `.jv3` or `.dmk` images, and `--write-back` saves modified disks when the run ends. `--timeout` sets how long each wait may take (30 seconds by default).
-- `--dump-screen` prints the screen as text, with Portuguese letters, block graphics and katakana as Unicode. `--dump-memory 4300:256` prints a hex dump.
-- Exit code 0 means every step succeeded, 1 means a wait timed out (the screen is printed to stderr), and 2 means a usage error or a bad file.
-
-Full contract: [lode/cp500/headless-runner.md](lode/cp500/headless-runner.md).
-
-## Technology
-
-- .NET 10, Avalonia UI 11.x
-- NativeAOT for desktop (19MB native binary)
-- WebAssembly for browser
-- MIT licensed
-
-## Project Structure
-
-```
-src/
-  Heh8080.Core/      # Cpu8080, CpuZ80, memory, I/O bus
-  Heh8080.Devices/   # FDC, console, MMU, printer, auxiliary, timer
-  Heh8080.Terminal/  # FJM-3A terminal emulator
-  Heh8080.App/       # Shared UI library: ViewModels, Views, Controls
-  Heh8080.Mcp/       # MCP server for AI-assisted development
-  Heh8080.Cp500Runner/ # heh8080-cp500 headless CP-500 command-line runner
-  Heh8080.Desktop/   # Desktop entry point with Avalonia UI
-  Heh8080.Browser/   # Browser entry point with Avalonia WASM
-tests/
-  Heh8080.Tests/     # Unit and integration tests
-  cpu_tests/         # External CPU test suites
-```
-
-## Building
+Precisa do [.NET 10](https://dotnet.microsoft.com/download).
 
 ```bash
-# Desktop (NativeAOT)
+dotnet run --project src/Heh8080.Desktop
+```
+
+Para gerar o executável nativo:
+
+```bash
 dotnet publish src/Heh8080.Desktop -c Release
-
-# Browser (WASM)
-dotnet publish src/Heh8080.Browser -c Release
-
-# CP-500 headless runner (NativeAOT)
-dotnet publish src/Heh8080.Cp500Runner -c Release
 ```
 
-## Releases
+## Projetos relacionados
 
-Push a version tag on this branch to build NativeAOT zip archives (Windows x64, Linux x64, macOS arm64) for the desktop app and `heh8080-cp500`, then create a GitHub Release:
+- [LOLOS](https://github.com/fjzeit/lolos): sistema operacional compatível com CP/M 2.2, escrito em assembly 8080
 
-```bash
-git tag v1.0
-git push origin v1.0
-```
-
-The tag (without the leading `v`) is embedded as the assembly version. Check the runner with `heh8080-cp500 --version`.
-
-## Related Projects
-
-- **LOLOS**: https://github.com/fjzeit/lolos - CP/M 2.2 compatible OS in pure 8080 assembly
-
-## License
+## Licença
 
 MIT
