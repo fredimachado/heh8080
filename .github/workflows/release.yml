@@ -52,7 +52,7 @@ jobs:
           dotnet-version: "10.0.x"
 
       - name: Install NativeAOT prerequisites (Linux)
-        if: runner.os == "Linux"
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y clang zlib1g-dev
@@ -103,7 +103,7 @@ jobs:
             -p:IncludeSourceRevisionInInformationalVersion=false
 
       - name: Zip artifacts (Unix)
-        if: runner.os != "Windows"
+        if: runner.os != 'Windows'
         shell: bash
         env:
           RID: ${{ matrix.rid }}
@@ -121,7 +121,7 @@ jobs:
           )
 
       - name: Zip artifacts (Windows)
-        if: runner.os == "Windows"
+        if: runner.os == 'Windows'
         shell: pwsh
         env:
           RID: ${{ matrix.rid }}
