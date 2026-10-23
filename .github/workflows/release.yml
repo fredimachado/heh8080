@@ -86,6 +86,12 @@ jobs:
             -p:InformationalVersion="$VERSION" \
             -p:IncludeSourceRevisionInInformationalVersion=false
 
+      - name: Remove debug symbols
+        shell: bash
+        env:
+          RID: ${{ matrix.rid }}
+        run: find "publish/desktop/$RID" -name '*.pdb' -delete
+
       - name: Zip artifacts (Unix)
         if: runner.os != 'Windows'
         shell: bash
